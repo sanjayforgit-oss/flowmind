@@ -587,7 +587,7 @@ export async function generateWorkflowFromIntent(input: string): Promise<Generat
 }
 
 /**
- * CONVERSATIONAL COPILOT ENGINE (Multi-turn Reasoning & Memory)
+ * CONVERSATIONAL COPILOT ENGINE (Gemini LLM Powered with Rule-Based Fallback)
  */
 export async function processCopilotConversation(
   messages: ChatMessage[],
@@ -598,9 +598,57 @@ export async function processCopilotConversation(
   generatedWorkflow?: GeneratedWorkflow;
   updatedWorkflow?: GeneratedWorkflow;
   suggestedReplies?: string[];
+  isGeminiPowered?: boolean;
+}> {
+  // 1. Attempt Real Gemini LLM Call via Secure Server Endpoint
+  try {
+    const res = await fetch('/api/copilot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages,
+        activeWorkflow,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.data) {
+        return {
+          reply: data.data.reply,
+          proposal: data.data.proposal,
+          generatedWorkflow: data.data.generatedWorkflow,
+          updatedWorkflow: data.data.updatedWorkflow,
+          suggestedReplies: data.data.suggestedReplies,
+          isGeminiPowered: true,
+        };
+      }
+    }
+  } catch (err) {
+    console.info('[COPILOT AI] Using local workflow intelligence fallback.');
+  }
+
+  // 2. Graceful Fallback to Rule-Based Engine
+  return processRuleBasedConversationFallback(messages, activeWorkflow);
+}
+
+/**
+ * RULE-BASED FALLBACK ENGINE (Preserved for offline/error resiliency)
+ */
+export async function processRuleBasedConversationFallback(
+  messages: ChatMessage[],
+  activeWorkflow: GeneratedWorkflow | null
+): Promise<{
+  reply: string;
+  proposal?: WorkflowProposal;
+  generatedWorkflow?: GeneratedWorkflow;
+  updatedWorkflow?: GeneratedWorkflow;
+  suggestedReplies?: string[];
 }> {
   // Simulate natural AI thought latency
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
   const userText = lastUserMsg?.content.trim() || '';

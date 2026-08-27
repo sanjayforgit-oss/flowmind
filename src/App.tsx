@@ -16,6 +16,7 @@ import { WorkflowsPage } from './pages/WorkflowsPage';
 import { SimulationPage } from './pages/SimulationPage';
 import { ConflictsPage } from './pages/ConflictsPage';
 import { ExecutionsPage } from './pages/ExecutionsPage';
+import { AuditTrailPage } from './pages/AuditTrailPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -30,6 +31,7 @@ export const App: React.FC = () => {
               {/* Public Authentication Routes (Guarded for Logged-in users) */}
               <Route element={<PublicRoute />}>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/auth" element={<Navigate to="/login" replace />} />
                 <Route path="/signup" element={<SignUpPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -47,6 +49,8 @@ export const App: React.FC = () => {
                   <Route path="/simulation" element={<SimulationPage />} />
                   <Route path="/simulator" element={<Navigate to="/simulation" replace />} />
                   <Route path="/executions" element={<ExecutionsPage />} />
+                  <Route path="/audit" element={<AuditTrailPage />} />
+                  <Route path="/history" element={<Navigate to="/audit" replace />} />
                   <Route path="/analytics" element={<AnalyticsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="*" element={<NotFoundPage />} />

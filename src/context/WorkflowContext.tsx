@@ -3,6 +3,7 @@ import type { GeneratedWorkflow, Action, FlowNode, FlowNodeType } from '../types
 import { generateWorkflowFromIntent } from '../services/aiService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { recordAuditEvent, type AuditEvent } from '../services/auditTrailService';
 
 export interface SavedWorkflowMeta {
   id: string;
@@ -16,7 +17,7 @@ export interface SavedWorkflowMeta {
 
 interface WorkflowContextValue {
   activeWorkflow: GeneratedWorkflow | null;
-  setActiveWorkflow: (wf: GeneratedWorkflow | null) => void;
+  setActiveWorkflow: (wf: GeneratedWorkflow | null, source?: 'user' | 'ai') => void;
   savedWorkflows: SavedWorkflowMeta[];
   selectedNodeId: string | null;
   setSelectedNodeId: (id: string | null) => void;
@@ -33,6 +34,12 @@ interface WorkflowContextValue {
   addNodeByType: (type: FlowNodeType) => void;
   deleteActionFromActiveWorkflow: (actionId: string) => void;
   addActionToActiveWorkflow: (action: Action) => void;
+  recordWorkflowAudit: (
+    action: AuditEvent['action'],
+    description: string,
+    metadata?: Record<string, any>,
+    actorType?: 'user' | 'ai'
+  ) => Promise<void>;
 }
 
 const WorkflowContext = createContext<WorkflowContextValue | undefined>(undefined);
@@ -40,9 +47,9 @@ const WorkflowContext = createContext<WorkflowContextValue | undefined>(undefine
 const LOCAL_STORAGE_KEY = 'flowmind_saved_workflows';
 
 export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
-  const [activeWorkflow, setActiveWorkflow] = useState<GeneratedWorkflow | null>(null);
+  const [activeWorkflow, setActiveWorkflowState] = useState<GeneratedWorkflow | null>(null);
   const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflowMeta[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -54,10 +61,47 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!activeWorkflow) {
       generateWorkflowFromIntent('customer complaint').then((wf) => {
-        setActiveWorkflow(wf);
+        setActiveWorkflowState(wf);
       });
     }
   }, []);
+
+  const setActiveWorkflow = (wf: GeneratedWorkflow | null, source: 'user' | 'ai' = 'user') => {
+    setActiveWorkflowState(wf);
+    if (wf && user && source === 'ai') {
+      recordAuditEvent({
+        workflowId: wf.id,
+        workflowName: wf.name,
+        userId: user.id,
+        actorType: 'ai',
+        actorName: 'FLOWMIND AI',
+        action: 'workflow_generated_by_ai',
+        description: `FLOWMIND AI synthesized new workflow structure: "${wf.name}" with ${wf.nodes.length} nodes.`,
+        metadata: { category: wf.category, nodesCount: wf.nodes.length, confidence: wf.confidence },
+      });
+    }
+  };
+
+  const recordWorkflowAudit = async (
+    action: AuditEvent['action'],
+    description: string,
+    metadata?: Record<string, any>,
+    actorType: 'user' | 'ai' = 'user'
+  ) => {
+    if (!user || !activeWorkflow) return;
+    const actorName = actorType === 'ai' ? 'FLOWMIND AI' : profile?.fullName || user.email?.split('@')[0] || 'User';
+
+    await recordAuditEvent({
+      workflowId: activeWorkflow.id,
+      workflowName: activeWorkflow.name,
+      userId: user.id,
+      actorType,
+      actorName,
+      action,
+      description,
+      metadata,
+    });
+  };
 
   // Fetch workflows belonging to current user
   const fetchUserWorkflows = useCallback(async () => {
@@ -93,7 +137,6 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (error) {
         console.error('Error fetching workflows from Supabase:', error);
-        // Fallback to local storage
         const stored = localStorage.getItem(`${LOCAL_STORAGE_KEY}_${user.id}`);
         if (stored) setSavedWorkflows(JSON.parse(stored));
       } else if (data) {
@@ -135,6 +178,8 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     setIsSaving(true);
     const nowIso = new Date().toISOString();
+    const isExisting = savedWorkflows.some((w) => w.id === target.id);
+    const actorName = profile?.fullName || user.email?.split('@')[0] || 'User';
 
     const metaRecord: SavedWorkflowMeta = {
       id: target.id,
@@ -154,6 +199,19 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setSavedWorkflows(updated);
         localStorage.setItem(`${LOCAL_STORAGE_KEY}_${user.id}`, JSON.stringify(updated));
         setIsSaving(false);
+
+        // Record audit
+        recordAuditEvent({
+          workflowId: target.id,
+          workflowName: target.name,
+          userId: user.id,
+          actorType: 'user',
+          actorName,
+          action: isExisting ? 'workflow_updated' : 'workflow_created',
+          description: `${actorName} ${isExisting ? 'updated' : 'created'} workflow "${target.name}"`,
+          metadata: { status: target.status, nodeCount: target.nodes.length },
+        });
+
         return { success: true };
       } catch (err: any) {
         setIsSaving(false);
@@ -182,6 +240,19 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const existing = savedWorkflows.filter((w) => w.id !== target.id);
       setSavedWorkflows([metaRecord, ...existing]);
       setIsSaving(false);
+
+      // Record audit
+      recordAuditEvent({
+        workflowId: target.id,
+        workflowName: target.name,
+        userId: user.id,
+        actorType: 'user',
+        actorName,
+        action: isExisting ? 'workflow_updated' : 'workflow_created',
+        description: `${actorName} ${isExisting ? 'updated' : 'created'} workflow "${target.name}"`,
+        metadata: { status: target.status, nodeCount: target.nodes.length },
+      });
+
       return { success: true };
     } catch (err: any) {
       setIsSaving(false);
@@ -192,7 +263,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loadWorkflowById = async (id: string): Promise<boolean> => {
     const found = savedWorkflows.find((w) => w.id === id);
     if (found) {
-      setActiveWorkflow(found.rawWorkflow);
+      setActiveWorkflowState(found.rawWorkflow);
       setSelectedNodeId(null);
       return true;
     }
@@ -207,7 +278,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           .single();
 
         if (data && !error) {
-          setActiveWorkflow(data.workflow_data);
+          setActiveWorkflowState(data.workflow_data);
           setSelectedNodeId(null);
           return true;
         }
@@ -224,8 +295,22 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, error: 'Unauthenticated' };
     }
 
+    const target = savedWorkflows.find((w) => w.id === id);
+    const targetName = target?.name || 'Workflow';
+    const actorName = profile?.fullName || user.email?.split('@')[0] || 'User';
+
     const updated = savedWorkflows.filter((w) => w.id !== id);
     setSavedWorkflows(updated);
+
+    recordAuditEvent({
+      workflowId: id,
+      workflowName: targetName,
+      userId: user.id,
+      actorType: 'user',
+      actorName,
+      action: 'workflow_deleted',
+      description: `${actorName} deleted workflow "${targetName}"`,
+    });
 
     if (!configured) {
       localStorage.setItem(`${LOCAL_STORAGE_KEY}_${user.id}`, JSON.stringify(updated));
@@ -251,7 +336,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateActiveWorkflowName = (name: string) => {
     if (!activeWorkflow) return;
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
       name,
     });
@@ -259,7 +344,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateNodeTitle = (nodeId: string, title: string) => {
     if (!activeWorkflow) return;
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
       nodes: activeWorkflow.nodes.map((n) => (n.id === nodeId ? { ...n, title } : n)),
     });
@@ -267,10 +352,26 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateNodeDetails = (nodeId: string, updates: Partial<FlowNode>) => {
     if (!activeWorkflow) return;
-    setActiveWorkflow({
+    const targetNode = activeWorkflow.nodes.find((n) => n.id === nodeId);
+    const nodeTitle = updates.title || targetNode?.title || 'Node';
+
+    setActiveWorkflowState({
       ...activeWorkflow,
       nodes: activeWorkflow.nodes.map((n) => (n.id === nodeId ? { ...n, ...updates } : n)),
     });
+
+    if (user) {
+      recordAuditEvent({
+        workflowId: activeWorkflow.id,
+        workflowName: activeWorkflow.name,
+        userId: user.id,
+        actorType: 'user',
+        actorName: profile?.fullName || user.email?.split('@')[0] || 'User',
+        action: 'workflow_node_updated',
+        description: `Updated configuration for "${nodeTitle}" in "${activeWorkflow.name}"`,
+        metadata: { nodeId, updates },
+      });
+    }
   };
 
   const deleteNodeById = (nodeId: string) => {
@@ -278,7 +379,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const nodeToDelete = activeWorkflow.nodes.find((n) => n.id === nodeId);
     if (!nodeToDelete) return;
 
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
       nodes: activeWorkflow.nodes.filter((n) => n.id !== nodeId),
       actions: activeWorkflow.actions.filter((a) => a.label !== nodeToDelete.title),
@@ -286,6 +387,19 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (selectedNodeId === nodeId) {
       setSelectedNodeId(null);
+    }
+
+    if (user) {
+      recordAuditEvent({
+        workflowId: activeWorkflow.id,
+        workflowName: activeWorkflow.name,
+        userId: user.id,
+        actorType: 'user',
+        actorName: profile?.fullName || user.email?.split('@')[0] || 'User',
+        action: 'workflow_node_removed',
+        description: `Removed node "${nodeToDelete.title}" from "${activeWorkflow.name}"`,
+        metadata: { nodeId, nodeTitle: nodeToDelete.title },
+      });
     }
   };
 
@@ -298,31 +412,34 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         description: 'Webhook: Ingest external event payload',
       },
       aiAction: {
-        title: 'AI Intent Analyzer',
-        description: 'LLM NLP reasoning on payload attributes',
+        title: 'AI Classification',
+        description: 'NLP evaluation and smart routing',
       },
       condition: {
-        title: 'Policy Condition Branch',
-        description: 'Evaluate business logic criteria',
+        title: 'Policy Condition Rule',
+        description: 'Evaluate business logic parameters',
       },
       action: {
-        title: 'Execute Action',
-        description: 'Dispatches task to connected service API',
-        actionType: 'Create Ticket',
+        title: 'Automated Action Step',
+        description: 'Execute connected service integration',
+        actionType: 'Send Email',
       },
       approval: {
-        title: 'Human Approval Step',
-        description: 'Requires manager verification to continue',
+        title: 'Manager Approval Checkpoint',
+        description: 'Human sign-off required',
+        actionType: 'Request Approval',
       },
       end: {
-        title: 'Workflow Complete',
-        description: 'Execution pipeline concluded successfully',
+        title: 'Process Completed',
+        description: 'Workflow execution concluded',
       },
     };
 
-    const config = typeDefaults[type] || typeDefaults.action;
+    const config = typeDefaults[type] || { title: 'New Step', description: 'Action node' };
+    const newNodeId = `node-${Date.now()}`;
+
     const newNode: FlowNode = {
-      id: `node-${Date.now()}`,
+      id: newNodeId,
       type,
       title: config.title,
       description: config.description,
@@ -330,75 +447,49 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       actionType: config.actionType,
     };
 
-    const endNodeIndex = activeWorkflow.nodes.findIndex((n) => n.type === 'end');
-    const updatedNodes = [...activeWorkflow.nodes];
+    const newNodes = [...activeWorkflow.nodes];
+    const endNodeIndex = newNodes.findIndex((n) => n.type === 'end');
     if (endNodeIndex !== -1 && type !== 'end') {
-      updatedNodes.splice(endNodeIndex, 0, newNode);
+      newNodes.splice(endNodeIndex, 0, newNode);
     } else {
-      updatedNodes.push(newNode);
+      newNodes.push(newNode);
     }
 
-    const updatedActions =
-      type === 'action' || type === 'approval'
-        ? [
-            ...activeWorkflow.actions,
-            {
-              id: `act-${Date.now()}`,
-              type: type === 'approval' ? 'approval' : 'action',
-              label: newNode.title,
-              description: newNode.description,
-            },
-          ]
-        : activeWorkflow.actions;
-
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
-      nodes: updatedNodes,
-      actions: updatedActions,
+      nodes: newNodes,
     });
 
-    setSelectedNodeId(newNode.id);
+    setSelectedNodeId(newNodeId);
+
+    if (user) {
+      recordAuditEvent({
+        workflowId: activeWorkflow.id,
+        workflowName: activeWorkflow.name,
+        userId: user.id,
+        actorType: 'user',
+        actorName: profile?.fullName || user.email?.split('@')[0] || 'User',
+        action: 'workflow_node_added',
+        description: `Added new ${type} step "${config.title}" to "${activeWorkflow.name}"`,
+        metadata: { nodeId: newNodeId, nodeType: type },
+      });
+    }
   };
 
   const deleteActionFromActiveWorkflow = (actionId: string) => {
     if (!activeWorkflow) return;
-    const actionToDelete = activeWorkflow.actions.find((a) => a.id === actionId);
-    const actionLabel = actionToDelete?.label;
-
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
       actions: activeWorkflow.actions.filter((a) => a.id !== actionId),
-      nodes: activeWorkflow.nodes.filter((n) => !(n.type === 'action' && n.title === actionLabel)),
     });
   };
 
-  const addActionToActiveWorkflow = (newAction: Action) => {
+  const addActionToActiveWorkflow = (action: Action) => {
     if (!activeWorkflow) return;
-
-    const newNode: FlowNode = {
-      id: `node-${Date.now()}`,
-      type: (newAction.type === 'approval' ? 'approval' : 'action'),
-      title: newAction.label,
-      description: newAction.description,
-      status: 'ready',
-      actionType: newAction.label,
-    };
-
-    const endNodeIndex = activeWorkflow.nodes.findIndex((n) => n.type === 'end');
-    const updatedNodes = [...activeWorkflow.nodes];
-    if (endNodeIndex !== -1) {
-      updatedNodes.splice(endNodeIndex, 0, newNode);
-    } else {
-      updatedNodes.push(newNode);
-    }
-
-    setActiveWorkflow({
+    setActiveWorkflowState({
       ...activeWorkflow,
-      actions: [...activeWorkflow.actions, newAction],
-      nodes: updatedNodes,
+      actions: [...activeWorkflow.actions, action],
     });
-
-    setSelectedNodeId(newNode.id);
   };
 
   return (
@@ -422,6 +513,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addNodeByType,
         deleteActionFromActiveWorkflow,
         addActionToActiveWorkflow,
+        recordWorkflowAudit,
       }}
     >
       {children}

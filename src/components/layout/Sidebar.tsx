@@ -7,6 +7,7 @@ import {
   PlayCircle,
   AlertTriangle,
   Activity,
+  History as HistoryIcon,
   BarChart3,
   Settings,
   HelpCircle,
@@ -31,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     { name: 'Simulation', path: '/simulation', icon: PlayCircle },
     { name: 'Conflicts', path: '/conflicts', icon: AlertTriangle, badgeCount: 2 },
     { name: 'Executions', path: '/executions', icon: Activity },
+    { name: 'Audit Trail', path: '/audit', icon: HistoryIcon, badge: 'Logs' },
     { name: 'Analytics', path: '/analytics', icon: BarChart3 },
   ];
 

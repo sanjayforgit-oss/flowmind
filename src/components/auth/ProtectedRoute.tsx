@@ -4,19 +4,20 @@ import { Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const ProtectedRoute: React.FC = () => {
-  const { user, loading, session } = useAuth();
+  const { user, session, loading } = useAuth();
   const location = useLocation();
 
   if (import.meta.env.DEV) {
-    console.log('[PROTECTED ROUTE]', {
+    console.log('[PROTECTED ROUTE CHECK]', {
       pathname: location.pathname,
       loading,
-      authenticated: Boolean(user),
+      hasUser: Boolean(user),
+      hasSession: Boolean(session),
       userEmail: user?.email || null,
-      sessionId: session?.access_token ? 'valid-jwt' : null,
     });
   }
 
+  // 1. While Supabase session is being retrieved asynchronously, display loading screen
   if (loading) {
     return (
       <div className="min-h-screen bg-[#07090f] flex flex-col items-center justify-center text-slate-400">
@@ -31,12 +32,14 @@ export const ProtectedRoute: React.FC = () => {
     );
   }
 
-  if (!user) {
+  // 2. If no active Supabase session exists, strictly redirect unauthenticated visitor to /login
+  if (!user || !session) {
     if (import.meta.env.DEV) {
-      console.log(`[PROTECTED ROUTE] Unauthenticated access to "${location.pathname}". Redirecting to /login.`);
+      console.log(`[PROTECTED ROUTE] No active session. Redirecting unauthenticated user from "${location.pathname}" to "/login".`);
     }
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // 3. Authenticated session verified: render protected child routes
   return <Outlet />;
 };

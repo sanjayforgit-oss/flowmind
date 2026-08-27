@@ -25,9 +25,10 @@ import type {
 import { useWorkflow } from '../context/WorkflowContext';
 import { useToast } from '../context/ToastContext';
 import { Button } from '../components/common/Button';
+import { supabase } from '../lib/supabase';
 
 export const SimulationPage: React.FC = () => {
-  const { activeWorkflow } = useWorkflow();
+  const { activeWorkflow, recordWorkflowAudit } = useWorkflow();
   const navigate = useNavigate();
   const { showToast } = useToast();
 
@@ -40,12 +41,17 @@ export const SimulationPage: React.FC = () => {
 
   const isRunningRef = useRef(false);
   const timerRef = useRef<any>(null);
+  const stepsRef = useRef<SimulatedStep[]>([]);
+
+  // Keep live ref in sync with latest steps array
+  stepsRef.current = steps;
 
   // Initialize or re-plan steps whenever activeWorkflow or context changes (if not running)
   useEffect(() => {
     if (activeWorkflow && overallStatus === 'ready') {
       const planned = buildSimulationPlan(activeWorkflow, context);
       setSteps(planned);
+      stepsRef.current = planned;
       if (planned.length > 0) {
         setSelectedStepId(planned[0].id);
       }
@@ -63,7 +69,10 @@ export const SimulationPage: React.FC = () => {
 
   const handleReset = () => {
     isRunningRef.current = false;
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
 
     setOverallStatus('ready');
     setCurrentStepIndex(0);
@@ -72,72 +81,185 @@ export const SimulationPage: React.FC = () => {
     if (activeWorkflow) {
       const planned = buildSimulationPlan(activeWorkflow, context);
       setSteps(planned);
+      stepsRef.current = planned;
       if (planned.length > 0) setSelectedStepId(planned[0].id);
     }
     showToast('Simulation runtime reset.', 'info');
   };
 
+  const persistExecutionRecord = async (completedSteps: SimulatedStep[]) => {
+    try {
+      const {
+        data: { user: currentUser },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !currentUser) {
+        console.warn(
+          '[SIMULATION EXECUTION] User unauthenticated or could not get user from supabase.auth.getUser():',
+          userError
+        );
+        return;
+      }
+
+      const executionRecord = {
+        id: `exec-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        workflow_id: activeWorkflow?.id || null,
+        user_id: currentUser.id,
+        status: 'SUCCESS',
+        execution_data: {
+          total_steps: completedSteps.length,
+          simulation_mode: true,
+          status: 'SUCCESS',
+          workflow_name: activeWorkflow?.name || 'Simulation Workflow',
+          steps: completedSteps.map((s) => ({
+            id: s.id,
+            stepNumber: s.stepNumber,
+            title: s.title,
+            status: s.status,
+            nodeType: s.nodeType,
+            durationMs: s.durationMs,
+          })),
+          context_priority: context.priority,
+          elapsed_duration_ms: elapsedDurationMs,
+        },
+        duration_ms: elapsedDurationMs,
+        started_at: new Date(Date.now() - elapsedDurationMs).toISOString(),
+        completed_at: new Date().toISOString(),
+      };
+
+      const { data, error: insertError } = await supabase
+        .from('workflow_executions')
+        .insert(executionRecord)
+        .select();
+
+      if (insertError) {
+        // If error was due to foreign key constraint on workflow_id, retry with null workflow_id
+        if (insertError.message?.includes('foreign key') || insertError.code === '23503') {
+          const fallbackRecord = { ...executionRecord, workflow_id: null };
+          const { data: fbData, error: fbError } = await supabase
+            .from('workflow_executions')
+            .insert(fallbackRecord)
+            .select();
+
+          if (fbError) {
+            console.error(
+              '[SIMULATION EXECUTION ERROR] Failed to insert workflow execution record into Supabase:',
+              fbError
+            );
+          } else {
+            console.log(
+              '[SIMULATION EXECUTION SUCCESS] Successfully written record to workflow_executions in Supabase (unlinked workflow):',
+              fbData
+            );
+          }
+        } else {
+          console.error(
+            '[SIMULATION EXECUTION ERROR] Failed to insert workflow execution record into Supabase:',
+            insertError
+          );
+        }
+      } else {
+        console.log(
+          '[SIMULATION EXECUTION SUCCESS] Successfully written record to workflow_executions in Supabase:',
+          data
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[SIMULATION EXECUTION ERROR] Unexpected exception while writing workflow_executions:',
+        err
+      );
+    }
+  };
+
   const executeStepSequence = (startIndex: number) => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
     isRunningRef.current = true;
     setOverallStatus('running');
 
     let idx = startIndex;
 
-    const runStep = () => {
+    const runNextStep = () => {
       if (!isRunningRef.current) return;
 
-      if (idx >= steps.length) {
+      const currentSteps = stepsRef.current;
+
+      // Completion check: all steps finished
+      if (idx >= currentSteps.length) {
+        // Ensure all executed non-skipped steps are marked as SUCCESS
+        const finalSteps = currentSteps.map((s) =>
+          s.status === 'skipped' ? s : { ...s, status: 'success' as const }
+        );
+        setSteps(finalSteps);
         setOverallStatus('completed');
         isRunningRef.current = false;
         showToast('Simulation completed successfully in safe sandbox.', 'success');
+
+        // Persist execution record to Supabase
+        persistExecutionRecord(finalSteps);
+
+        if (activeWorkflow) {
+          recordWorkflowAudit(
+            'workflow_executed',
+            `Dry-run simulation of "${activeWorkflow.name}" executed successfully with all ${currentSteps.length} steps.`,
+            { totalSteps: currentSteps.length, priorityContext: context.priority }
+          );
+        }
         return;
       }
 
-      const step = steps[idx];
+      const step = currentSteps[idx];
 
       // If this step is skipped due to condition branch, advance immediately
       if (step.status === 'skipped') {
         idx += 1;
-        runStep();
+        runNextStep();
         return;
       }
 
       setCurrentStepIndex(idx);
       setSelectedStepId(step.id);
 
-      // Set current step to running
+      // Transition current step to RUNNING (and mark previous active steps as SUCCESS)
       setSteps((prev) =>
-        prev.map((s, i) => (i === idx ? { ...s, status: 'running' } : s))
+        prev.map((s, i) => {
+          if (i < idx && s.status !== 'skipped') return { ...s, status: 'success' };
+          if (i === idx) return { ...s, status: 'running' };
+          return s;
+        })
       );
 
-      const latency = step.durationMs + 200;
+      const latency = Math.max(step.durationMs || 350, 300);
       setElapsedDurationMs((prev) => prev + latency);
 
       timerRef.current = setTimeout(() => {
         if (!isRunningRef.current) return;
 
-        // Check if this step is Human Approval
+        // Check if this step is Human Approval Checkpoint
         if (step.nodeType === 'approval') {
-          setSteps((prev) =>
-            prev.map((s, i) => (i === idx ? { ...s, status: 'running' } : s))
-          );
           setOverallStatus('waiting_approval');
           isRunningRef.current = false;
           showToast('Simulation paused at Human Approval checkpoint.', 'info');
           return;
         }
 
-        // Mark current step as success
+        // Mark current step as SUCCESS
         setSteps((prev) =>
           prev.map((s, i) => (i === idx ? { ...s, status: 'success' } : s))
         );
 
+        // Advance to next step (e.g. step 03, step 04)
         idx += 1;
-        runStep();
+        runNextStep();
       }, latency);
     };
 
-    runStep();
+    runNextStep();
   };
 
   const handleStartSimulation = () => {
@@ -146,25 +268,40 @@ export const SimulationPage: React.FC = () => {
     handleReset();
     setTimeout(() => {
       executeStepSequence(0);
-    }, 100);
+    }, 150);
   };
 
   const handleApprove = () => {
     showToast('Human Approval simulated as APPROVED.', 'success');
-    // Mark approval step as success
-    setSteps((prev) =>
-      prev.map((s) => (s.nodeType === 'approval' ? { ...s, status: 'success' } : s))
-    );
 
-    // Resume execution from step after approval
-    const approvalIdx = steps.findIndex((s) => s.nodeType === 'approval');
-    if (approvalIdx !== -1) {
-      executeStepSequence(approvalIdx + 1);
+    const currentSteps = stepsRef.current;
+    const approvalIdx = currentSteps.findIndex((s) => s.nodeType === 'approval');
+
+    // Mark the approval step (and any previous steps) as SUCCESS immediately
+    const updatedSteps = currentSteps.map((s, i) => {
+      if (s.nodeType === 'approval' || (approvalIdx !== -1 && i <= approvalIdx)) {
+        return s.status !== 'skipped' ? { ...s, status: 'success' as const } : s;
+      }
+      return s;
+    });
+
+    setSteps(updatedSteps);
+
+    // Automatically propagate execution state down to remaining steps (03, 04, etc.)
+    if (approvalIdx !== -1 && approvalIdx + 1 < currentSteps.length) {
+      setTimeout(() => {
+        executeStepSequence(approvalIdx + 1);
+      }, 200);
+    } else {
+      setOverallStatus('completed');
+      persistExecutionRecord(updatedSteps);
+      showToast('All workflow steps completed successfully.', 'success');
     }
   };
 
   const handleReject = () => {
     isRunningRef.current = false;
+    if (timerRef.current) clearTimeout(timerRef.current);
     setOverallStatus('rejected');
     setSteps((prev) =>
       prev.map((s) => (s.nodeType === 'approval' ? { ...s, status: 'error' } : s))
@@ -251,13 +388,13 @@ export const SimulationPage: React.FC = () => {
                     ✓ Simulation Completed Successfully
                   </h4>
                   <p className="text-xs text-emerald-300/80 mt-0.5">
-                    All steps verified in safe local sandbox. Ready for production deployment review.
+                    All {steps.length} steps verified in safe local sandbox. Execution propagated to completion with 0 errors.
                   </p>
                 </div>
               </div>
 
-              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-md shrink-0">
-                Exit Code 0
+              <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-md shrink-0">
+                100% SUCCESS
               </span>
             </div>
           )}

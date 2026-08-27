@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Play, Save, Clock, Workflow as WorkflowIcon } from 'lucide-react';
+import { ShieldCheck, Play, Save, Clock, Workflow as WorkflowIcon, CheckCircle2 } from 'lucide-react';
 import type { GeneratedWorkflow } from '../../types';
 import { Button } from '../common/Button';
 import { useWorkflow } from '../../context/WorkflowContext';
@@ -12,7 +12,7 @@ interface WorkflowHeaderProps {
 
 export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
   const navigate = useNavigate();
-  const { saveCurrentWorkflow, isSaving } = useWorkflow();
+  const { saveCurrentWorkflow, isSaving, recordWorkflowAudit, setActiveWorkflow } = useWorkflow();
   const { showToast } = useToast();
 
   const handleValidate = () => {
@@ -34,6 +34,21 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
     }
   };
 
+  const handlePublish = async () => {
+    const publishedWf: GeneratedWorkflow = {
+      ...workflow,
+      status: 'ready',
+    };
+    setActiveWorkflow(publishedWf, 'user');
+    await saveCurrentWorkflow(publishedWf);
+    await recordWorkflowAudit(
+      'workflow_published',
+      `Published "${workflow.name}" to Ready state for production execution.`,
+      { nodesCount: workflow.nodes.length, status: 'ready' }
+    );
+    showToast(`Workflow "${workflow.name}" published to production!`, 'success');
+  };
+
   return (
     <div className="glass-card rounded-xl p-5 border border-white/[0.08] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
       {/* Title & Metadata */}
@@ -45,7 +60,11 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">
             Workflow Builder
           </span>
-          <span className="px-2 py-0.5 rounded text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/20 capitalize">
+          <span className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize border ${
+            workflow.status === 'ready'
+              ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
+              : 'text-amber-300 bg-amber-500/10 border-amber-500/20'
+          }`}>
             {workflow.status}
           </span>
         </div>
@@ -75,8 +94,8 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
         </div>
       </div>
 
-      {/* Action Buttons: Validate, Simulate, Save */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      {/* Action Buttons: Save, Publish, Validate, Simulate */}
+      <div className="flex flex-wrap items-center gap-2.5 shrink-0">
         <Button
           variant="outline"
           size="sm"
@@ -85,6 +104,15 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
           icon={<Save className="w-3.5 h-3.5" />}
         >
           {isSaving ? 'Saving...' : 'Save'}
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handlePublish}
+          icon={<CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+        >
+          Publish
         </Button>
 
         <Button

@@ -4,7 +4,7 @@ import { Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const PublicRoute: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const location = useLocation();
 
   if (import.meta.env.DEV) {
@@ -31,7 +31,8 @@ export const PublicRoute: React.FC = () => {
 
   // If already authenticated, redirect to previous target or dashboard
   if (user) {
-    const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+    const defaultRoute = profile?.role === 'admin' ? '/admin' : '/';
+    const from = (location.state as { from?: { pathname: string } })?.from?.pathname || defaultRoute;
     if (import.meta.env.DEV) {
       console.log(`[PUBLIC ROUTE] Already authenticated as "${user.email}". Redirecting away from "${location.pathname}" to "${from}".`);
     }

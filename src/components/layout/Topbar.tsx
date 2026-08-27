@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -7,14 +7,23 @@ import {
   Sparkles,
   Command,
   CheckCheck,
-  ShieldCheck,
+  Shield,
   Zap,
   LogOut,
   Settings,
   ChevronDown,
+  CheckCircle2,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import {
+  fetchUserNotifications,
+  markAllNotificationsAsRead,
+  type InAppNotification,
+} from '../../services/notificationService';
 
 interface TopbarProps {
   onOpenSidebar: () => void;
@@ -26,17 +35,61 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenSidebar }) => {
   const { user, profile, signOut } = useAuth();
   const { showToast } = useToast();
 
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const notifMenuRef = useRef<HTMLDivElement>(null);
+
+  const loadNotifications = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await fetchUserNotifications(user.id);
+      setNotifications(data);
+    } catch (err) {
+      console.warn('Could not load notifications:', err);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  // Realtime notifications listener
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel(`realtime_notifications_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadNotifications();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, loadNotifications]);
 
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setShowUserMenu(false);
+      }
+      if (notifMenuRef.current && !notifMenuRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -90,8 +143,16 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenSidebar }) => {
     navigate('/login');
   };
 
-  const displayName = profile?.fullName || user?.email?.split('@')[0] || 'Admin';
-  const displayEmail = user?.email || 'admin@flowmind.ai';
+  const handleMarkAllRead = async () => {
+    if (!user) return;
+    await markAllNotificationsAsRead(user.id);
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    showToast('All notifications marked as read', 'success');
+  };
+
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const displayName = profile?.fullName || user?.email?.split('@')[0] || 'User';
+  const displayEmail = user?.email || 'user@flowmind.ai';
   const initials = displayName
     .split(' ')
     .map((n) => n[0])
@@ -147,14 +208,16 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenSidebar }) => {
         </button>
 
         {/* Notifications Dropdown Toggle */}
-        <div className="relative">
+        <div className="relative" ref={notifMenuRef}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
             aria-label="Notifications"
           >
             <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-[#090b10]" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-[#090b10] animate-pulse" />
+            )}
           </button>
 
           {/* Notifications Flyout */}
@@ -163,39 +226,72 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenSidebar }) => {
               <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/[0.08]">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-white">Notifications</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300">
-                    2 New
-                  </span>
+                  {unreadCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300">
+                      {unreadCount} New
+                    </span>
+                  )}
                 </div>
-                <button
-                  onClick={() => {
-                    showToast('All notifications marked as read', 'success');
-                    setShowNotifications(false);
-                  }}
-                  className="text-[11px] text-slate-400 hover:text-indigo-400 transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <CheckCheck className="w-3.5 h-3.5" /> Mark read
-                </button>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={handleMarkAllRead}
+                    className="text-[11px] text-slate-400 hover:text-indigo-400 transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" /> Mark read
+                  </button>
+                )}
               </div>
 
-              <div className="space-y-2.5">
-                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
-                  <div className="flex items-center gap-2 text-amber-300 font-medium mb-1">
-                    <Zap className="w-3.5 h-3.5" /> Potential Workflow Overlap
+              <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-400 font-mono">
+                    No notifications yet.
                   </div>
-                  <p className="text-slate-300 text-[11px] leading-relaxed">
-                    Conflict detected between Welcome Email and Promo Email workflows.
-                  </p>
-                </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      className={`p-3 rounded-lg text-xs space-y-1 transition-colors ${
+                        n.type === 'approval'
+                          ? 'bg-emerald-950/30 border border-emerald-500/30'
+                          : n.type === 'rejection'
+                          ? 'bg-rose-950/30 border border-rose-500/30'
+                          : 'bg-indigo-950/30 border border-indigo-500/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`font-semibold flex items-center gap-1.5 ${
+                            n.type === 'approval'
+                              ? 'text-emerald-300'
+                              : n.type === 'rejection'
+                              ? 'text-rose-300'
+                              : 'text-indigo-300'
+                          }`}
+                        >
+                          {n.type === 'approval' ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : n.type === 'rejection' ? (
+                            <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                          ) : (
+                            <Zap className="w-3.5 h-3.5 text-indigo-400" />
+                          )}
+                          {n.title}
+                        </span>
 
-                <div className="p-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-xs">
-                  <div className="flex items-center gap-2 text-indigo-300 font-medium mb-1">
-                    <ShieldCheck className="w-3.5 h-3.5" /> AI Optimization Ready
-                  </div>
-                  <p className="text-slate-300 text-[11px] leading-relaxed">
-                    Customer Complaint workflow has a high-priority condition recommendation.
-                  </p>
-                </div>
+                        <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(n.created_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+
+                      <p className="text-slate-300 text-[11px] leading-relaxed">{n.message}</p>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -221,36 +317,62 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenSidebar }) => {
             </div>
           </div>
 
-          {/* User Flyout Menu */}
+          {/* User Flyout */}
           {showUserMenu && (
-            <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[#0f1420] border border-white/10 shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-              <div className="px-3 py-2 border-b border-white/5">
-                <div className="text-xs font-semibold text-white truncate">{displayName}</div>
-                <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">{displayEmail}</div>
+            <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[#0f1420] border border-white/10 shadow-2xl z-50 p-2 text-xs animate-in fade-in zoom-in-95 duration-150">
+              <div className="px-3 py-2 border-b border-white/[0.06] mb-1">
+                <p className="font-semibold text-white truncate">{displayName}</p>
+                <p className="text-[11px] text-slate-400 font-mono truncate">{displayEmail}</p>
+                <div className="mt-1.5 flex items-center gap-1">
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase ${
+                      profile?.role === 'admin'
+                        ? 'text-rose-300 bg-rose-500/15 border border-rose-500/30'
+                        : profile?.role === 'manager'
+                        ? 'text-amber-300 bg-amber-500/15 border border-amber-500/30'
+                        : 'text-indigo-300 bg-indigo-500/15 border border-indigo-500/30'
+                    }`}
+                  >
+                    {profile?.role === 'manager'
+                      ? `${profile.department || 'HR'} Manager`
+                      : profile?.role || 'user'}
+                  </span>
+                </div>
               </div>
 
-              <div className="py-1 space-y-0.5">
+              {profile?.role === 'admin' && (
                 <button
                   onClick={() => {
                     setShowUserMenu(false);
-                    navigate('/settings');
+                    navigate('/admin');
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-200 hover:text-white hover:bg-white/[0.06] transition-colors text-left cursor-pointer"
+                  className="w-full px-3 py-2 rounded-lg text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer text-left"
                 >
-                  <Settings className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Workspace Settings</span>
+                  <Shield className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Admin Control Center</span>
                 </button>
-              </div>
+              )}
 
-              <div className="pt-1 border-t border-white/5">
-                <button
-                  onClick={handleSignOut}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setShowUserMenu(false);
+                  navigate('/settings');
+                }}
+                className="w-full px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.06] flex items-center gap-2 transition-colors cursor-pointer text-left"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Account Settings</span>
+              </button>
+
+              <div className="border-t border-white/[0.06] my-1" />
+
+              <button
+                onClick={handleSignOut}
+                className="w-full px-3 py-2 rounded-lg text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer text-left"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
             </div>
           )}
         </div>

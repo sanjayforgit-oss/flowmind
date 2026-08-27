@@ -13,6 +13,8 @@ import { statMetrics, mockWorkflows } from '../data/mockData';
 import type { Workflow } from '../types';
 import { useToast } from '../context/ToastContext';
 
+import { SimulationApprovalRequestsCard } from '../components/dashboard/SimulationApprovalRequestsCard';
+
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -46,7 +48,10 @@ export const DashboardPage: React.FC = () => {
         ))}
       </div>
 
-      {/* 3. Recent Workflows Section */}
+      {/* 3. Simulation Approval Requests Section (Role-Based) */}
+      <SimulationApprovalRequestsCard />
+
+      {/* 4. Recent Workflows Section */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>

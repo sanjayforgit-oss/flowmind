@@ -84,16 +84,17 @@ export async function recordAuditEvent(params: {
 }
 
 /**
- * Fetch all audit logs for the authenticated user
+ * Fetch all audit logs for the authenticated user or all logs for admin
  */
 export async function fetchWorkflowAuditLogs(
-  userId: string,
+  userId?: string,
   workflowId?: string,
   limit = 50
 ): Promise<AuditEvent[]> {
   if (!isSupabaseConfigured()) {
     try {
-      const stored = localStorage.getItem(`${LOCAL_STORAGE_AUDIT}_${userId}`);
+      const storageKey = userId ? `${LOCAL_STORAGE_AUDIT}_${userId}` : LOCAL_STORAGE_AUDIT;
+      const stored = localStorage.getItem(storageKey);
       const logs: AuditEvent[] = stored ? JSON.parse(stored) : [];
       if (workflowId) {
         return logs.filter((l) => l.workflow_id === workflowId).slice(0, limit);
@@ -108,9 +109,12 @@ export async function fetchWorkflowAuditLogs(
     let query = supabase
       .from('workflow_audit_logs')
       .select('*')
-      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit);
+
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
 
     if (workflowId) {
       query = query.eq('workflow_id', workflowId);
@@ -120,7 +124,8 @@ export async function fetchWorkflowAuditLogs(
 
     if (error) {
       console.warn('Supabase fetch audit logs error, using local fallback:', error);
-      const stored = localStorage.getItem(`${LOCAL_STORAGE_AUDIT}_${userId}`);
+      const storageKey = userId ? `${LOCAL_STORAGE_AUDIT}_${userId}` : LOCAL_STORAGE_AUDIT;
+      const stored = localStorage.getItem(storageKey);
       const logs: AuditEvent[] = stored ? JSON.parse(stored) : [];
       if (workflowId) {
         return logs.filter((l) => l.workflow_id === workflowId).slice(0, limit);

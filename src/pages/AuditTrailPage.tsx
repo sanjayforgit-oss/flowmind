@@ -15,7 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 export const AuditTrailPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
 
   const [logs, setLogs] = useState<AuditEvent[]>([]);
@@ -32,14 +32,16 @@ export const AuditTrailPage: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const records = await fetchWorkflowAuditLogs(user.id, undefined, 100);
+      const isElevated = profile?.role === 'admin' || profile?.role === 'manager';
+      const queryUserId = isElevated ? undefined : user.id;
+      const records = await fetchWorkflowAuditLogs(queryUserId, undefined, 100);
       setLogs(records);
     } catch (err) {
       console.error('Failed to load audit logs:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, profile?.role]);
 
   useEffect(() => {
     loadAuditLogs();

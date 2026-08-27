@@ -27,8 +27,13 @@ import { useToast } from '../context/ToastContext';
 import { Button } from '../components/common/Button';
 import { supabase } from '../lib/supabase';
 
+import { useAuth, type Department } from '../context/AuthContext';
+import { createApprovalRequest, updateApprovalStatus } from '../services/approvalService';
+import { SimulationApprovalRequestsCard } from '../components/dashboard/SimulationApprovalRequestsCard';
+
 export const SimulationPage: React.FC = () => {
   const { activeWorkflow, recordWorkflowAudit } = useWorkflow();
+  const { user, profile, canApproveCheckpoint } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
 
@@ -262,17 +267,51 @@ export const SimulationPage: React.FC = () => {
     runNextStep();
   };
 
-  const handleStartSimulation = () => {
+  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
+
+  const handleStartSimulation = async () => {
     if (overallStatus === 'running' || steps.length === 0) return;
     showToast('Starting workflow step simulation...', 'info');
+
+    // Create persistent approval request if workflow has human approval node
+    const hasApprovalNode = steps.some((s) => s.nodeType === 'approval');
+    if (hasApprovalNode && activeWorkflow) {
+      const created = await createApprovalRequest({
+        workflowName: activeWorkflow.name || 'Automated Workflow',
+        employeeName: profile?.fullName || user?.email?.split('@')[0] || 'Mohanraj',
+        department: (activeWorkflow.category as Department) || profile?.department || 'HR',
+        userId: user?.id,
+        details: {
+          workflowId: activeWorkflow.id,
+          totalSteps: steps.length,
+          confidence: activeWorkflow.confidence,
+        },
+      });
+      if (created) {
+        setCurrentRequestId(created.id);
+      }
+    }
+
     handleReset();
     setTimeout(() => {
       executeStepSequence(0);
     }, 150);
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     showToast('Human Approval simulated as APPROVED.', 'success');
+
+    if (currentRequestId && activeWorkflow) {
+      await updateApprovalStatus({
+        requestId: currentRequestId,
+        newStatus: 'accepted',
+        workflowName: activeWorkflow.name,
+        approverId: user?.id || 'admin',
+        approverName: profile?.fullName || user?.email?.split('@')[0] || 'Manager',
+        approverRole: profile?.role || 'user',
+        approverDepartment: profile?.department,
+      });
+    }
 
     const currentSteps = stepsRef.current;
     const approvalIdx = currentSteps.findIndex((s) => s.nodeType === 'approval');
@@ -299,10 +338,23 @@ export const SimulationPage: React.FC = () => {
     }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     isRunningRef.current = false;
     if (timerRef.current) clearTimeout(timerRef.current);
     setOverallStatus('rejected');
+
+    if (currentRequestId && activeWorkflow) {
+      await updateApprovalStatus({
+        requestId: currentRequestId,
+        newStatus: 'rejected',
+        workflowName: activeWorkflow.name,
+        approverId: user?.id || 'admin',
+        approverName: profile?.fullName || user?.email?.split('@')[0] || 'Manager',
+        approverRole: profile?.role || 'user',
+        approverDepartment: profile?.department,
+      });
+    }
+
     setSteps((prev) =>
       prev.map((s) => (s.nodeType === 'approval' ? { ...s, status: 'error' } : s))
     );
@@ -373,6 +425,10 @@ export const SimulationPage: React.FC = () => {
               onApprove={handleApprove}
               onReject={handleReject}
               isProcessing={false}
+              canApprove={canApproveCheckpoint('Management / Support')}
+              userRole={profile?.role || 'user'}
+              userDepartment={profile?.department}
+              requiredDepartment="Management / Support"
             />
           )}
 
@@ -416,6 +472,9 @@ export const SimulationPage: React.FC = () => {
           <SimulationInsightsCard analytics={analytics} />
         </div>
       </div>
+
+      {/* Simulation Approval Queue & Requests */}
+      <SimulationApprovalRequestsCard />
 
       {/* Safety Notice Footer */}
       <div className="p-3.5 rounded-xl bg-[#090c14] border border-white/5 flex items-center justify-between text-xs text-slate-400 font-mono">

@@ -4,6 +4,7 @@ import { ToastProvider } from './context/ToastContext';
 import { AuthProvider } from './context/AuthContext';
 import { WorkflowProvider } from './context/WorkflowContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { AdminRoute } from './components/auth/AdminRoute';
 import { PublicRoute } from './components/auth/PublicRoute';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/LoginPage';
@@ -19,6 +20,7 @@ import { ExecutionsPage } from './pages/ExecutionsPage';
 import { AuditTrailPage } from './pages/AuditTrailPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 export const App: React.FC = () => {
@@ -37,7 +39,15 @@ export const App: React.FC = () => {
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
               </Route>
 
-              {/* Protected Application Routes (Requires Active Auth Session) */}
+              {/* Protected Administrator Routes (Requires Auth + Admin Role) */}
+              <Route element={<AdminRoute />}>
+                <Route path="/admin" element={<AdminDashboardPage />} />
+                <Route path="/admin/users" element={<AdminDashboardPage />} />
+                <Route path="/admin/workflows" element={<AdminDashboardPage />} />
+                <Route path="/admin/audit" element={<AdminDashboardPage />} />
+              </Route>
+
+              {/* Protected User Application Routes (Requires Active Auth Session) */}
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
                   <Route path="/" element={<DashboardPage />} />

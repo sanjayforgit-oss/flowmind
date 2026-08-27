@@ -103,7 +103,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  // Fetch workflows belonging to current user
+  // Fetch workflows belonging to current user or all workflows for admin/manager
   const fetchUserWorkflows = useCallback(async () => {
     if (!user) {
       setSavedWorkflows([]);
@@ -111,6 +111,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     setIsLoadingWorkflows(true);
+    const isElevated = profile?.role === 'admin' || profile?.role === 'manager';
 
     if (!configured) {
       // Local storage fallback for offline demo evaluation
@@ -129,11 +130,16 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('workflows')
         .select('*')
-        .eq('user_id', user.id)
         .order('updated_at', { ascending: false });
+
+      if (!isElevated) {
+        query = query.eq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Error fetching workflows from Supabase:', error);
@@ -156,7 +162,7 @@ export const WorkflowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setIsLoadingWorkflows(false);
     }
-  }, [user, configured]);
+  }, [user, profile?.role, configured]);
 
   useEffect(() => {
     if (user) {

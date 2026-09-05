@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleGeminiCopilotRequest } from './server/geminiHandler.js';
+import { handleRenderApiRequest } from './server/render/renderHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +32,27 @@ const MIME_TYPES = {
 const server = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
   const pathname = parsedUrl.pathname;
+
+  // Handle Render Workflows API Endpoints
+  if (pathname.startsWith('/api/render')) {
+    let bodyData = '';
+    req.on('data', (chunk) => {
+      bodyData += chunk;
+    });
+
+    req.on('end', async () => {
+      try {
+        const body = bodyData ? JSON.parse(bodyData) : {};
+        const result = await handleRenderApiRequest(pathname, req.method, body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err?.message || 'Render server error' }));
+      }
+    });
+    return;
+  }
 
   // Handle Secure Gemini API Endpoint
   if (pathname === '/api/copilot' && req.method === 'POST') {

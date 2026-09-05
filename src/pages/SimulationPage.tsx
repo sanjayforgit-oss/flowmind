@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
   CheckCircle2,
   ShieldAlert,
+  Server,
+  ArrowRight,
 } from 'lucide-react';
 import { SimulationHeader } from '../components/simulation/SimulationHeader';
 import { ExecutionSummaryBar } from '../components/simulation/ExecutionSummaryBar';
@@ -12,6 +14,7 @@ import { ExecutionTimelineList } from '../components/simulation/ExecutionTimelin
 import { StepPayloadInspector } from '../components/simulation/StepPayloadInspector';
 import { HumanApprovalCard } from '../components/simulation/HumanApprovalCard';
 import { SimulationInsightsCard } from '../components/simulation/SimulationInsightsCard';
+import { RenderExecutionModal } from '../components/simulation/RenderExecutionModal';
 import {
   buildSimulationPlan,
   computeSimulationAnalytics,
@@ -25,7 +28,7 @@ import type {
 import { useWorkflow } from '../context/WorkflowContext';
 import { useToast } from '../context/ToastContext';
 import { Button } from '../components/common/Button';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 import { useAuth, type Department } from '../context/AuthContext';
 import { createApprovalRequest, updateApprovalStatus } from '../services/approvalService';
@@ -43,10 +46,15 @@ export const SimulationPage: React.FC = () => {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [elapsedDurationMs, setElapsedDurationMs] = useState<number>(0);
+  const [isRenderModalOpen, setIsRenderModalOpen] = useState<boolean>(false);
+  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
+  const [approvalPayload, setApprovalPayload] = useState<any>(null);
 
   const isRunningRef = useRef(false);
   const timerRef = useRef<any>(null);
   const stepsRef = useRef<SimulatedStep[]>([]);
+  const currentRequestIdRef = useRef<string | null>(null);
+  const isProcessingApprovalRef = useRef<boolean>(false);
 
   // Keep live ref in sync with latest steps array
   stepsRef.current = steps;
@@ -82,6 +90,10 @@ export const SimulationPage: React.FC = () => {
     setOverallStatus('ready');
     setCurrentStepIndex(0);
     setElapsedDurationMs(0);
+    setCurrentRequestId(null);
+    currentRequestIdRef.current = null;
+    setApprovalPayload(null);
+    isProcessingApprovalRef.current = false;
 
     if (activeWorkflow) {
       const planned = buildSimulationPlan(activeWorkflow, context);
@@ -267,38 +279,315 @@ export const SimulationPage: React.FC = () => {
     runNextStep();
   };
 
-  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
-
   const handleStartSimulation = async () => {
     if (overallStatus === 'running' || steps.length === 0) return;
     showToast('Starting workflow step simulation...', 'info');
 
+    handleReset();
+    isProcessingApprovalRef.current = false;
+    setApprovalPayload(null);
+
     // Create persistent approval request if workflow has human approval node
     const hasApprovalNode = steps.some((s) => s.nodeType === 'approval');
     if (hasApprovalNode && activeWorkflow) {
-      const created = await createApprovalRequest({
-        workflowName: activeWorkflow.name || 'Automated Workflow',
-        employeeName: profile?.fullName || user?.email?.split('@')[0] || 'Mohanraj',
-        department: (activeWorkflow.category as Department) || profile?.department || 'HR',
-        userId: user?.id,
-        details: {
-          workflowId: activeWorkflow.id,
-          totalSteps: steps.length,
-          confidence: activeWorkflow.confidence,
-        },
-      });
-      if (created) {
-        setCurrentRequestId(created.id);
+      try {
+        const created = await createApprovalRequest({
+          workflowName: activeWorkflow.name || 'Automated Workflow',
+          employeeName: profile?.fullName || user?.email?.split('@')[0] || 'Mohanraj',
+          department: (activeWorkflow.category as Department) || profile?.department || 'HR',
+          userId: user?.id,
+          details: {
+            workflowId: activeWorkflow.id,
+            totalSteps: steps.length,
+            confidence: activeWorkflow.confidence,
+          },
+        });
+        if (created) {
+          setCurrentRequestId(created.id);
+          currentRequestIdRef.current = created.id;
+        }
+      } catch (err) {
+        console.warn('Failed creating approval request:', err);
       }
     }
 
-    handleReset();
     setTimeout(() => {
       executeStepSequence(0);
     }, 150);
   };
 
+  const executeStepSequenceRef = useRef(executeStepSequence);
+  executeStepSequenceRef.current = executeStepSequence;
+  const persistExecutionRecordRef = useRef(persistExecutionRecord);
+  persistExecutionRecordRef.current = persistExecutionRecord;
+
+  // --------------------------------------------------------------------------
+  // Handle Incoming Decision from Manager / Admin (Realtime or Polling)
+  // --------------------------------------------------------------------------
+  const handleManagerApprovalPayload = useCallback(
+    (payload: {
+      approved_by?: string;
+      approved_by_role?: string;
+      approved_at?: string;
+      [key: string]: any;
+    }) => {
+      if (isProcessingApprovalRef.current) return;
+      isProcessingApprovalRef.current = true;
+
+      setApprovalPayload(payload);
+      showToast(
+        `Manager approval confirmed by ${payload.approved_by || 'Manager'} (${payload.approved_by_role || 'Management'}). Advancing simulation...`,
+        'success'
+      );
+
+      const currentSteps = stepsRef.current;
+      const approvalIdx = currentSteps.findIndex((s) => s.nodeType === 'approval');
+
+      if (approvalIdx === -1) {
+        setOverallStatus('completed');
+        return;
+      }
+
+      // Mark the approval step as SUCCESS with approver payload
+      const updatedSteps = currentSteps.map((s, i) => {
+        if (s.nodeType === 'approval') {
+          return {
+            ...s,
+            status: 'success' as const,
+            outputSummary: `Approved by ${payload.approved_by || 'Authorized Manager'} (${payload.approved_by_role || 'Management'})`,
+            payload: {
+              ...s.payload,
+              state: 'APPROVED',
+              approved_by: payload.approved_by || 'Manager',
+              approved_by_role: payload.approved_by_role || 'management',
+              approved_at: payload.approved_at || new Date().toISOString(),
+            },
+          };
+        }
+        if (i < approvalIdx && s.status !== 'skipped') {
+          return { ...s, status: 'success' as const };
+        }
+        return s;
+      });
+
+      setSteps(updatedSteps);
+      stepsRef.current = updatedSteps;
+
+      // Automatically advance to remaining steps (Step 06, 07, 08 Complete) without resetting steps back to 0
+      if (approvalIdx + 1 < currentSteps.length) {
+        setTimeout(() => {
+          executeStepSequenceRef.current(approvalIdx + 1);
+        }, 250);
+      } else {
+        setOverallStatus('completed');
+        persistExecutionRecordRef.current(updatedSteps);
+        showToast('All workflow steps completed successfully.', 'success');
+      }
+    },
+    [showToast]
+  );
+
+  const handleManagerRejectionPayload = useCallback(
+    (payload: {
+      rejected_by?: string;
+      rejected_by_role?: string;
+      rejected_at?: string;
+      [key: string]: any;
+    }) => {
+      if (isProcessingApprovalRef.current) return;
+      isProcessingApprovalRef.current = true;
+
+      isRunningRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setOverallStatus('rejected');
+
+      const currentSteps = stepsRef.current;
+      const updatedSteps = currentSteps.map((s) =>
+        s.nodeType === 'approval'
+          ? {
+              ...s,
+              status: 'error' as const,
+              outputSummary: `Rejected by ${payload.rejected_by || 'Manager'} (${payload.rejected_by_role || 'Management'})`,
+              payload: {
+                ...s.payload,
+                state: 'REJECTED',
+                rejected_by: payload.rejected_by,
+                rejected_at: payload.rejected_at,
+              },
+            }
+          : s
+      );
+      setSteps(updatedSteps);
+      stepsRef.current = updatedSteps;
+
+      showToast(
+        `Governance checkpoint was rejected by ${payload.rejected_by || 'Manager'}. Simulation halted.`,
+        'warning'
+      );
+    },
+    [showToast]
+  );
+
+  // --------------------------------------------------------------------------
+  // Supabase Realtime Subscription + 2-second Polling for Approvals
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (overallStatus !== 'waiting_approval') {
+      return;
+    }
+
+    let isSubscribed = true;
+
+    const evaluateApprovalRecord = (record: any) => {
+      if (!record || !isSubscribed || isProcessingApprovalRef.current) return;
+
+      const targetReqId = currentRequestIdRef.current || currentRequestId;
+      const isIdMatch = targetReqId ? record.id === targetReqId : false;
+      const isWorkflowMatch =
+        activeWorkflow &&
+        record.workflow_name === activeWorkflow.name &&
+        (!record.requester_id || record.requester_id === user?.id);
+
+      if (!isIdMatch && !isWorkflowMatch) return;
+
+      if (record.status === 'accepted' || record.status === 'approved') {
+        handleManagerApprovalPayload({
+          approved_by: record.approved_by || 'Manager',
+          approved_by_role: record.approved_by_role || record.approver_role || 'manager',
+          approved_at: record.approved_at || record.updated_at || new Date().toISOString(),
+          id: record.id,
+        });
+      } else if (record.status === 'rejected') {
+        handleManagerRejectionPayload({
+          rejected_by: record.rejected_by || 'Manager',
+          rejected_by_role: record.rejected_by_role || record.approver_role || 'manager',
+          rejected_at: record.rejected_at || record.updated_at || new Date().toISOString(),
+          id: record.id,
+        });
+      }
+    };
+
+    // 1. Check local storage immediately (handles cross-session / local offline testing)
+    const checkLocalStorage = () => {
+      try {
+        const stored = localStorage.getItem('flowmind_simulation_approval_requests');
+        if (stored) {
+          const list = JSON.parse(stored);
+          if (Array.isArray(list)) {
+            const targetReqId = currentRequestIdRef.current || currentRequestId;
+            const target = list.find((item: any) =>
+              targetReqId
+                ? item.id === targetReqId
+                : activeWorkflow && item.workflow_name === activeWorkflow.name
+            );
+            if (
+              target &&
+              (target.status === 'accepted' ||
+                target.status === 'approved' ||
+                target.status === 'rejected')
+            ) {
+              evaluateApprovalRecord(target);
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    // 2. Poll Supabase & localStorage every 2 seconds
+    const pollApprovals = async () => {
+      if (!isSubscribed || isProcessingApprovalRef.current) return;
+
+      checkLocalStorage();
+      if (isProcessingApprovalRef.current) return;
+
+      if (isSupabaseConfigured()) {
+        try {
+          const targetReqId = currentRequestIdRef.current || currentRequestId;
+          let query = supabase.from('simulation_approval_requests').select('*');
+
+          if (targetReqId) {
+            query = query.eq('id', targetReqId);
+          } else if (activeWorkflow) {
+            query = query.eq('workflow_name', activeWorkflow.name);
+            if (user?.id) {
+              query = query.eq('requester_id', user.id);
+            }
+          }
+
+          const { data, error } = await query
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          if (!error && data && data.length > 0) {
+            evaluateApprovalRecord(data[0]);
+          }
+        } catch (err) {
+          console.warn('[SIMULATION REALTIME] Polling error:', err);
+        }
+      }
+    };
+
+    // Initial check
+    pollApprovals();
+
+    // 2-second interval poll
+    const intervalId = setInterval(pollApprovals, 2000);
+
+    // 3. Supabase Realtime channel subscription
+    let channel: any = null;
+    if (isSupabaseConfigured()) {
+      const targetReqId = currentRequestIdRef.current || currentRequestId;
+      const channelId = `sim_approval_${targetReqId || Date.now()}`;
+      channel = supabase
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'simulation_approval_requests',
+          },
+          (payload) => {
+            if (payload.new) {
+              evaluateApprovalRecord(payload.new);
+            }
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(intervalId);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [
+    overallStatus,
+    currentRequestId,
+    activeWorkflow,
+    user?.id,
+    handleManagerApprovalPayload,
+    handleManagerRejectionPayload,
+  ]);
+
+  // Strict RBAC: Employees cannot self-approve
   const handleApprove = async () => {
+    const requiredDept = (activeWorkflow?.category as Department) || 'Management / Support';
+    if (!canApproveCheckpoint(requiredDept)) {
+      showToast(
+        'Action restricted: Standard employee accounts cannot self-approve governance checkpoints. Administrator or Manager authorization required.',
+        'error'
+      );
+      return;
+    }
+
     showToast('Human Approval simulated as APPROVED.', 'success');
 
     if (currentRequestId && activeWorkflow) {
@@ -316,7 +605,6 @@ export const SimulationPage: React.FC = () => {
     const currentSteps = stepsRef.current;
     const approvalIdx = currentSteps.findIndex((s) => s.nodeType === 'approval');
 
-    // Mark the approval step (and any previous steps) as SUCCESS immediately
     const updatedSteps = currentSteps.map((s, i) => {
       if (s.nodeType === 'approval' || (approvalIdx !== -1 && i <= approvalIdx)) {
         return s.status !== 'skipped' ? { ...s, status: 'success' as const } : s;
@@ -325,8 +613,8 @@ export const SimulationPage: React.FC = () => {
     });
 
     setSteps(updatedSteps);
+    stepsRef.current = updatedSteps;
 
-    // Automatically propagate execution state down to remaining steps (03, 04, etc.)
     if (approvalIdx !== -1 && approvalIdx + 1 < currentSteps.length) {
       setTimeout(() => {
         executeStepSequence(approvalIdx + 1);
@@ -339,6 +627,15 @@ export const SimulationPage: React.FC = () => {
   };
 
   const handleReject = async () => {
+    const requiredDept = (activeWorkflow?.category as Department) || 'Management / Support';
+    if (!canApproveCheckpoint(requiredDept)) {
+      showToast(
+        'Action restricted: Standard employee accounts cannot reject governance checkpoints. Administrator or Manager authorization required.',
+        'error'
+      );
+      return;
+    }
+
     isRunningRef.current = false;
     if (timerRef.current) clearTimeout(timerRef.current);
     setOverallStatus('rejected');
@@ -396,6 +693,8 @@ export const SimulationPage: React.FC = () => {
         isRunning={overallStatus === 'running'}
         isCompleted={overallStatus === 'completed'}
         isWaitingApproval={overallStatus === 'waiting_approval'}
+        canExecuteRender={overallStatus === 'completed' || !!approvalPayload}
+        onExecuteRender={() => setIsRenderModalOpen(true)}
         onRunSimulation={handleStartSimulation}
         onReset={handleReset}
       />
@@ -432,26 +731,57 @@ export const SimulationPage: React.FC = () => {
             />
           )}
 
-          {/* Completed Banner */}
+          {/* Completed Banner with Render Execution CTA */}
           {overallStatus === 'completed' && (
-            <div className="glass-card rounded-xl p-5 border border-emerald-500/30 bg-emerald-950/20 shadow-xl flex items-center justify-between gap-4 animate-in fade-in duration-200">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-                  <CheckCircle2 className="w-5 h-5" />
+            <div className="glass-card rounded-xl p-5 border border-emerald-500/30 bg-emerald-950/20 shadow-xl space-y-4 animate-in fade-in duration-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">
+                      ✓ Simulation Completed Successfully
+                    </h4>
+                    <p className="text-xs text-emerald-300/80 mt-0.5">
+                      All {steps.length} steps verified in safe local sandbox. Execution propagated to completion with 0 errors.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">
-                    ✓ Simulation Completed Successfully
-                  </h4>
-                  <p className="text-xs text-emerald-300/80 mt-0.5">
-                    All {steps.length} steps verified in safe local sandbox. Execution propagated to completion with 0 errors.
-                  </p>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-md shrink-0">
+                    100% SUCCESS
+                  </span>
+
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setIsRenderModalOpen(true)}
+                    icon={<Server className="w-3.5 h-3.5" />}
+                    className="font-semibold shadow-lg shadow-indigo-600/30"
+                  >
+                    Execute on Render Workflows
+                  </Button>
                 </div>
               </div>
 
-              <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-md shrink-0">
-                100% SUCCESS
-              </span>
+              {/* Simulation vs Execution Notice */}
+              <div className="p-3 rounded-lg bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-300">
+                <div className="flex items-center gap-2">
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono text-[10px] font-semibold border border-amber-500/20">
+                    Simulation
+                  </span>
+                  <span className="text-slate-400">Safe preview sandbox (0 external calls)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-500 hidden sm:block" />
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 font-mono text-[10px] font-semibold border border-indigo-500/20">
+                    Execution
+                  </span>
+                  <span className="text-slate-300 font-medium">Production Render Workflows engine</span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -484,6 +814,23 @@ export const SimulationPage: React.FC = () => {
         </span>
         <span className="text-emerald-400 font-semibold">100% Isolated Sandbox</span>
       </div>
+
+      {/* Render Workflows Real Execution Modal */}
+      <RenderExecutionModal
+        isOpen={isRenderModalOpen}
+        onClose={() => setIsRenderModalOpen(false)}
+        workflowId={activeWorkflow.id}
+        workflowName={activeWorkflow.name}
+        simulationContext={{
+          ...context,
+          simulatedSteps: steps.length,
+          approvalStatus: approvalPayload ? 'APPROVED' : 'SIMULATION_APPROVED',
+          approver:
+            approvalPayload?.approved_by ||
+            (overallStatus === 'completed' ? 'Authorized Approver' : 'Manager'),
+          approvalPayload,
+        }}
+      />
     </div>
   );
 };

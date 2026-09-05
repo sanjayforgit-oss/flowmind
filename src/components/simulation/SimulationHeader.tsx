@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, RotateCcw, ArrowLeft, ShieldAlert } from 'lucide-react';
+import { Play, RotateCcw, ArrowLeft, ShieldAlert, Server } from 'lucide-react';
 import { Button } from '../common/Button';
 
 interface SimulationHeaderProps {
@@ -8,6 +8,8 @@ interface SimulationHeaderProps {
   isRunning: boolean;
   isCompleted: boolean;
   isWaitingApproval: boolean;
+  canExecuteRender?: boolean;
+  onExecuteRender?: () => void;
   onRunSimulation: () => void;
   onReset: () => void;
 }
@@ -17,6 +19,8 @@ export const SimulationHeader: React.FC<SimulationHeaderProps> = ({
   isRunning,
   isCompleted,
   isWaitingApproval,
+  canExecuteRender = false,
+  onExecuteRender,
   onRunSimulation,
   onReset,
 }) => {
@@ -60,6 +64,18 @@ export const SimulationHeader: React.FC<SimulationHeaderProps> = ({
         >
           Reset
         </Button>
+
+        {(isCompleted || canExecuteRender) && onExecuteRender && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onExecuteRender}
+            icon={<Server className="w-3.5 h-3.5" />}
+            className="font-semibold shadow-lg shadow-indigo-600/30 animate-in fade-in"
+          >
+            Execute on Render Workflows
+          </Button>
+        )}
 
         <Button
           variant="primary"

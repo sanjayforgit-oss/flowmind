@@ -91,15 +91,22 @@ export const HumanApprovalCard: React.FC<HumanApprovalCardProps> = ({
         </div>
       ) : (
         <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200">
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <strong className="block text-amber-300 font-semibold">
                 Authorization Required to Approve
               </strong>
               <span className="text-[11px] text-amber-200/80 leading-relaxed block mt-0.5">
-                Standard user accounts are restricted to view-only access. Sign in as an <strong>Administrator</strong> or <strong>{requiredDepartment} Manager</strong> to execute approval decisions.
+                Standard user accounts are restricted to view-only access. Sign in as an <strong>Administrator</strong> or <strong>{requiredDepartment} Manager</strong> in another session to approve.
               </span>
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-amber-500/20 text-[11px] text-emerald-300/90 font-mono">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>Listening in real time for manager decision (auto-sync active)...</span>
+              </div>
             </div>
           </div>
 

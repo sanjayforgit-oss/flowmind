@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bot,
@@ -7,6 +7,8 @@ import {
   CheckCircle2,
   Workflow as WorkflowIcon,
   Play,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import type { ChatMessage, WorkflowProposal } from '../../services/aiService';
 import { Button } from '../common/Button';
@@ -26,15 +28,60 @@ export const CopilotChatStream: React.FC<CopilotChatStreamProps> = ({
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
 
+  // Clean up speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const handleToggleSpeak = (msgId: string, text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    // Clean markdown characters before speech synthesis
+    const cleanText = text
+      .replace(/[*#_`~>[\]]/g, '')
+      .replace(/•/g, '')
+      .replace(/\n+/g, '. ')
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onend = () => {
+      setSpeakingMsgId(null);
+    };
+
+    utterance.onerror = () => {
+      setSpeakingMsgId(null);
+    };
+
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 pr-2">
       {messages.map((msg) => {
         const isUser = msg.role === 'user';
+        const isSpeaking = speakingMsgId === msg.id;
 
         return (
           <div
@@ -57,7 +104,7 @@ export const CopilotChatStream: React.FC<CopilotChatStreamProps> = ({
             {/* Message Bubble */}
             <div className={`max-w-[85%] sm:max-w-[75%] space-y-2`}>
               <div
-                className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed border shadow-lg ${
+                className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed border shadow-lg relative group ${
                   isUser
                     ? 'bg-gradient-to-r from-indigo-600/90 to-violet-600/90 text-white border-indigo-400/30 rounded-tr-none'
                     : 'bg-[#0f1422] text-slate-200 border-white/[0.08] rounded-tl-none'
@@ -155,6 +202,34 @@ export const CopilotChatStream: React.FC<CopilotChatStreamProps> = ({
                         Simulate
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {/* Speaker/Listen Audio Button for Assistant Messages */}
+                {!isUser && (
+                  <div className="pt-2 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSpeak(msg.id, msg.content)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono flex items-center gap-1 transition-all cursor-pointer ${
+                        isSpeaking
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                      }`}
+                      title={isSpeaking ? 'Stop reading' : 'Listen to response'}
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <VolumeX className="w-3 h-3 text-cyan-400" />
+                          <span>Stop Listening</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3 h-3 text-slate-400 group-hover:text-cyan-400" />
+                          <span>Listen</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
               </div>

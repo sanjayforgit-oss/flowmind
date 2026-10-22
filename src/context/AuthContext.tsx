@@ -183,7 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
-      localStorage.setItem('flowmind_demo_auth', JSON.stringify(demoProfile));
+      localStorage.removeItem('flowmind_demo_auth');
     } catch {}
 
     setUser(demoUser);
@@ -212,38 +212,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let isMounted = true;
 
-    // Check for saved Demo Auth session
+    // Ensure any previously persisted demo auth is wiped so every visit requires logging in
     try {
-      const savedDemo = localStorage.getItem('flowmind_demo_auth');
-      if (savedDemo) {
-        const parsed = JSON.parse(savedDemo);
-        const demoUser = {
-          id: parsed.id || '00000000-0000-4000-a000-000000000001',
-          email: parsed.email || 'demo@flowmind.ai',
-          user_metadata: { full_name: parsed.fullName },
-          aud: 'authenticated',
-        } as unknown as User;
-        const demoSession = {
-          access_token: 'demo-session-token',
-          user: demoUser,
-        } as unknown as Session;
-
-        if (isMounted) {
-          setUser(demoUser);
-          setSession(demoSession);
-          setProfile(parsed);
-          setLoading(false);
-          return;
-        }
-      }
+      localStorage.removeItem('flowmind_demo_auth');
     } catch {}
 
     if (!configured) {
-      if (import.meta.env.DEV) {
-        console.warn(
-          '[AUTH STATE] VITE_SUPABASE_URL is currently unconfigured or placeholder in .env.'
-        );
-      }
       setSession(null);
       setUser(null);
       setProfile(null);
@@ -291,10 +265,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (session?.user) {
         await syncUserProfile(session.user);
       } else {
-        // Only clear profile if not in demo auth mode
-        if (!localStorage.getItem('flowmind_demo_auth')) {
-          setProfile(null);
-        }
+        setProfile(null);
       }
       setLoading(false);
     });

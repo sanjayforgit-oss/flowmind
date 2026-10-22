@@ -357,13 +357,13 @@ export const LoginPage: React.FC = () => {
                   : 'Email'}
               </label>
               <Input
-                type="email"
+                type="text"
                 icon={<Mail className="w-4 h-4 text-slate-400" />}
-                placeholder="name@company.com"
+                placeholder={portalMode === 'admin' ? 'admin or admin@flowmind.ai' : 'operator or operator@flowmind.ai'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="username"
                 className="py-2 text-xs sm:text-sm"
               />
             </div>
@@ -446,6 +446,35 @@ export const LoginPage: React.FC = () => {
                 ? `Sign in to ${department} Department`
                 : 'Sign in to Account'}
             </Button>
+            {/* Default Credentials Cheat Sheet */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-white/10 space-y-1.5 text-[11px] font-mono">
+              <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-semibold">
+                <span>Default Credentials</span>
+                <span className="text-emerald-400">Ready to Use</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <div 
+                  onClick={() => { setEmail('admin'); setPassword('AdminPassword@123'); }}
+                  className="p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] cursor-pointer transition-colors border border-white/5"
+                >
+                  <span className="text-rose-400 font-bold block">Admin Account</span>
+                  <span className="text-slate-300 block truncate">User: admin</span>
+                  <span className="text-slate-400 block truncate">Pass: AdminPassword@123</span>
+                </div>
+                <div 
+                  onClick={() => { setEmail('operator'); setPassword('OperatorPassword@123'); }}
+                  className="p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] cursor-pointer transition-colors border border-white/5"
+                >
+                  <span className="text-indigo-400 font-bold block">Operator Account</span>
+                  <span className="text-slate-300 block truncate">User: operator</span>
+                  <span className="text-slate-400 block truncate">Pass: OperatorPassword@123</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 text-center pt-1">
+                Click any credential box above to auto-fill.
+              </p>
+            </div>
+
           </form>
 
           {portalMode === 'user' && (

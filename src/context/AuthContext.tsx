@@ -276,6 +276,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [configured]);
 
+  // Built-in Default Platform Credentials
+  const BUILTIN_CREDENTIALS = {
+    admin: {
+      usernames: ['admin@flowmind.ai', 'admin', 'deepikabhuvaneshwaran8@gmail.com'],
+      password: 'AdminPassword@123',
+      role: 'admin' as UserRole,
+      department: 'Operations' as Department,
+      fullName: 'System Administrator',
+    },
+    operator: {
+      usernames: ['operator@flowmind.ai', 'operator', 'user@flowmind.ai', 'demo@flowmind.ai'],
+      password: 'OperatorPassword@123',
+      role: 'user' as UserRole,
+      department: 'Operations' as Department,
+      fullName: 'Platform Operator',
+    },
+    manager: {
+      usernames: ['manager@flowmind.ai', 'manager'],
+      password: 'ManagerPassword@123',
+      role: 'manager' as UserRole,
+      department: 'Operations' as Department,
+      fullName: 'Department Manager',
+    },
+  };
+
   // 1. Password Sign In
   const signIn = async (
     email: string,
@@ -283,7 +308,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     expectedRole: UserRole = 'user',
     department?: Department
   ): Promise<{ error: string | null; role?: UserRole }> => {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanInput = email.trim().toLowerCase();
+    const cleanEmail = cleanInput;
 
     if (expectedRole === 'manager' && !department) {
       return {
@@ -291,10 +317,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    // A. Check Built-in Default Credentials first (always reliable without Supabase configuration)
+    const matchedAccount = Object.values(BUILTIN_CREDENTIALS).find((acc) =>
+      acc.usernames.includes(cleanInput)
+    );
+
+    if (matchedAccount) {
+      if (password !== matchedAccount.password) {
+        return { error: 'Incorrect password. Please verify the credentials.' };
+      }
+
+      const assignedRole = matchedAccount.role;
+      const assignedDept = (department || matchedAccount.department) as Department;
+
+      const builtInUser = {
+        id: assignedRole === 'admin' ? '00000000-0000-4000-a000-000000000001' : '00000000-0000-4000-a000-000000000002',
+        email: matchedAccount.usernames[0],
+        user_metadata: { full_name: matchedAccount.fullName },
+        aud: 'authenticated',
+        created_at: new Date().toISOString(),
+      } as unknown as User;
+
+      const builtInSession = {
+        access_token: 'flowmind-builtin-token',
+        token_type: 'bearer',
+        expires_in: 86400,
+        refresh_token: 'flowmind-refresh-token',
+        user: builtInUser,
+      } as unknown as Session;
+
+      const builtInProfile: UserProfile = {
+        id: builtInUser.id,
+        fullName: matchedAccount.fullName,
+        email: matchedAccount.usernames[0],
+        role: assignedRole,
+        department: assignedDept,
+      };
+
+      setUser(builtInUser);
+      setSession(builtInSession);
+      setProfile(builtInProfile);
+      setLoading(false);
+
+      return { error: null, role: assignedRole };
+    }
+
     if (!configured) {
       return {
         error:
-          'Supabase is not configured. Use the 1-Click Demo Login button below to explore the application.',
+          'Invalid credentials. Please use the default credentials (admin / AdminPassword@123 or operator / OperatorPassword@123) or click 1-Click Access.',
       };
     }
 

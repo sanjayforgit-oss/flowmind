@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, getSupabaseUrl } from '../lib/supabase';
 
-export type UserRole = 'user' | 'manager' | 'admin';
+export type UserRole = 'admin' | 'manager' | 'user';
 export type Department = 'HR' | 'Support' | 'Sales' | 'Finance' | 'Operations' | 'IT' | 'Other';
 
 export interface UserProfile {
@@ -28,6 +28,7 @@ interface AuthContextValue {
     expectedRole?: UserRole,
     department?: Department
   ) => Promise<{ error: string | null; role?: UserRole }>;
+  signInAsDemo: (role?: UserRole, department?: Department) => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -82,15 +83,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   const configured = isSupabaseConfigured();
-
-  // Clean any legacy demo auth bypass from previous sessions
-  useEffect(() => {
-    try {
-      localStorage.removeItem('flowmind_demo_auth');
-    } catch {
-      // ignore
-    }
-  }, []);
 
   // Synchronize profile row from Supabase `profiles` table
   const syncUserProfile = async (
@@ -163,30 +155,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newProfile;
   };
 
-  // Direct server-side verification of user role
-  const verifyDatabaseRole = async (): Promise<UserRole> => {
-    if (!user || !configured) return profile?.role || 'user';
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
+  // Instant Demo Sign-In (no password needed)
+  const signInAsDemo = async (targetRole: UserRole = 'admin', targetDept: Department = 'Operations') => {
+    const demoUser = {
+      id: '00000000-0000-4000-a000-000000000001',
+      app_metadata: {},
+      user_metadata: { full_name: targetRole === 'admin' ? 'Demo Administrator' : 'Demo Operator' },
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+      email: targetRole === 'admin' ? 'admin@flowmind.ai' : 'demo@flowmind.ai',
+    } as unknown as User;
 
-      if (error || !data) return profile?.role || 'user';
-      return (data.role as UserRole) || 'user';
-    } catch {
-      return profile?.role || 'user';
-    }
+    const demoSession = {
+      access_token: 'demo-session-token',
+      token_type: 'bearer',
+      expires_in: 86400,
+      refresh_token: 'demo-refresh-token',
+      user: demoUser,
+    } as unknown as Session;
+
+    const demoProfile: UserProfile = {
+      id: demoUser.id,
+      fullName: targetRole === 'admin' ? 'Demo Administrator' : targetRole === 'manager' ? `${targetDept} Manager` : 'Demo Operator',
+      email: demoUser.email || 'demo@flowmind.ai',
+      role: targetRole,
+      department: targetDept,
+    };
+
+    try {
+      localStorage.setItem('flowmind_demo_auth', JSON.stringify(demoProfile));
+    } catch {}
+
+    setUser(demoUser);
+    setSession(demoSession);
+    setProfile(demoProfile);
+    setLoading(false);
   };
 
-  // Check if current user has authorization to approve simulation checkpoint
+  const isAdmin = profile?.role === 'admin';
+  const isManager = profile?.role === 'manager';
+
   const canApproveCheckpoint = (checkpointDept?: string): boolean => {
-    if (!profile) return false;
-    if (profile.role === 'admin') return true;
-    if (profile.role === 'manager') {
+    if (isAdmin) return true;
+    if (isManager && profile?.department) {
       if (!checkpointDept) return true;
-      if (!profile.department) return true;
       return (
         profile.department.toLowerCase() === checkpointDept.toLowerCase() ||
         checkpointDept.toLowerCase().includes('manager') ||
@@ -194,11 +206,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         checkpointDept.toLowerCase().includes('support')
       );
     }
-    return false; // Regular users are view-only
+    return false;
   };
 
   useEffect(() => {
     let isMounted = true;
+
+    // Check for saved Demo Auth session
+    try {
+      const savedDemo = localStorage.getItem('flowmind_demo_auth');
+      if (savedDemo) {
+        const parsed = JSON.parse(savedDemo);
+        const demoUser = {
+          id: parsed.id || '00000000-0000-4000-a000-000000000001',
+          email: parsed.email || 'demo@flowmind.ai',
+          user_metadata: { full_name: parsed.fullName },
+          aud: 'authenticated',
+        } as unknown as User;
+        const demoSession = {
+          access_token: 'demo-session-token',
+          user: demoUser,
+        } as unknown as Session;
+
+        if (isMounted) {
+          setUser(demoUser);
+          setSession(demoSession);
+          setProfile(parsed);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {}
 
     if (!configured) {
       if (import.meta.env.DEV) {
@@ -220,7 +258,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted) return;
         if (error || !session) {
           if (import.meta.env.DEV) {
-            console.log('[AUTH STATE] getSession: No active session found. User is unauthenticated.');
+            console.log('[AUTH STATE] getSession: No active session found.');
           }
           setSession(null);
           setUser(null);
@@ -229,9 +267,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        if (import.meta.env.DEV) {
-          console.log('[AUTH STATE] getSession: Active session restored for:', session.user.email);
-        }
         setSession(session);
         setUser(session.user);
         await syncUserProfile(session.user);
@@ -249,19 +284,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Real-time listener for Auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!isMounted) return;
-      if (import.meta.env.DEV) {
-        console.log(
-          `[AUTH STATE] onAuthStateChange event: ${event}, user: ${session?.user?.email || 'null'}`
-        );
-      }
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         await syncUserProfile(session.user);
       } else {
-        setProfile(null);
+        // Only clear profile if not in demo auth mode
+        if (!localStorage.getItem('flowmind_demo_auth')) {
+          setProfile(null);
+        }
       }
       setLoading(false);
     });
@@ -272,7 +305,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [configured]);
 
-  // 1. Password Sign In with expectedRole and department validation
+  // 1. Password Sign In
   const signIn = async (
     email: string,
     password: string,
@@ -281,7 +314,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ): Promise<{ error: string | null; role?: UserRole }> => {
     const cleanEmail = email.trim().toLowerCase();
 
-    // Manager Department Validation
     if (expectedRole === 'manager' && !department) {
       return {
         error: 'Please select your department to sign in as a Department Manager.',
@@ -291,12 +323,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!configured) {
       return {
         error:
-          'Supabase is not configured. Please add your real VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env and restart Vite.',
+          'Supabase is not configured. Use the 1-Click Demo Login button below to explore the application.',
       };
     }
 
     try {
-      // 1. Authenticate with Supabase Auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
@@ -307,7 +338,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        // 2. Query verified role from public.profiles table
         const isAdminAccount = cleanEmail === 'deepikabhuvaneshwaran8@gmail.com';
         let verifiedRole: UserRole = isAdminAccount ? 'admin' : 'user';
         let userDept = department || (isAdminAccount ? 'Operations' : undefined);
@@ -328,7 +358,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           userDept = roleRow.department as Department;
         }
 
-        // Strict Admin Portal Check: Must have role = 'admin' in database
         if (expectedRole === 'admin' && verifiedRole !== 'admin') {
           await supabase.auth.signOut();
           setUser(null);
@@ -341,7 +370,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
         }
 
-        // If logging in as manager, update department if selected
         if (expectedRole === 'manager' && userDept) {
           verifiedRole = 'manager';
           await supabase
@@ -361,164 +389,130 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setUser(data.user);
         setSession(data.session);
-        await syncUserProfile(data.user, undefined, verifiedRole, userDept);
+
+        const profileData = await syncUserProfile(data.user, undefined, verifiedRole, userDept);
+        setProfile(profileData);
+
         return { error: null, role: verifiedRole };
       }
 
-      return { error: null };
+      return { error: 'Authentication failed. Please verify your credentials.' };
     } catch (err: any) {
       return { error: formatAuthError(err) };
     }
   };
 
-  // 2. Sign Up Flow (Normal user only)
   const signUp = async (
     email: string,
     password: string,
     fullName: string
   ): Promise<{ error: string | null; needsConfirmation?: boolean }> => {
     if (!configured) {
-      return {
-        error:
-          'Supabase is not configured. Please add your real VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env and restart Vite.',
-      };
+      return { error: 'Supabase is not configured.' };
     }
 
     try {
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password,
         options: {
-          data: {
-            full_name: fullName.trim(),
-            role: 'user',
-          },
+          data: { full_name: fullName.trim() },
         },
       });
 
-      if (error) {
-        return { error: formatAuthError(error) };
-      }
+      if (error) return { error: formatAuthError(error) };
 
       if (data.user && !data.session) {
         return { error: null, needsConfirmation: true };
       }
 
-      if (data.user && data.session) {
-        setUser(data.user);
-        setSession(data.session);
-        await syncUserProfile(data.user, fullName.trim(), 'user');
-      }
-
-      return { error: null };
+      return { error: null, needsConfirmation: false };
     } catch (err: any) {
       return { error: formatAuthError(err) };
     }
   };
 
-  // 3. Google OAuth Sign In (User accounts)
   const signInWithGoogle = async (): Promise<{ error: string | null }> => {
     if (!configured) {
-      return {
-        error:
-          'Supabase is not configured. Please add your real VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env and restart Vite.',
-      };
+      return { error: 'Supabase is not configured.' };
     }
-
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-        },
+        options: { redirectTo: `${window.location.origin}/` },
       });
-
-      if (error) {
-        return { error: formatAuthError(error) };
-      }
-
+      if (error) return { error: formatAuthError(error) };
       return { error: null };
     } catch (err: any) {
       return { error: formatAuthError(err) };
     }
   };
 
-  // 4. Password Reset
   const resetPassword = async (email: string): Promise<{ error: string | null }> => {
-    if (!configured) {
-      return {
-        error:
-          'Supabase is not configured. Please add your real VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env and restart Vite.',
-      };
-    }
-
+    if (!configured) return { error: 'Supabase is not configured.' };
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
         redirectTo: `${window.location.origin}/reset-password`,
       });
-
-      if (error) {
-        return { error: formatAuthError(error) };
-      }
-
+      if (error) return { error: formatAuthError(error) };
       return { error: null };
     } catch (err: any) {
       return { error: formatAuthError(err) };
     }
   };
 
-  // 5. Update Password
   const updatePassword = async (newPassword: string): Promise<{ error: string | null }> => {
-    if (!configured) {
-      return {
-        error:
-          'Supabase is not configured. Please add your real VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env and restart Vite.',
-      };
-    }
-
+    if (!configured) return { error: 'Supabase is not configured.' };
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) {
-        return { error: formatAuthError(error) };
-      }
-
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) return { error: formatAuthError(error) };
       return { error: null };
     } catch (err: any) {
       return { error: formatAuthError(err) };
     }
   };
 
-  // 6. Sign Out
   const signOut = async (): Promise<void> => {
+    try {
+      localStorage.removeItem('flowmind_demo_auth');
+    } catch {}
     if (configured) {
       try {
         await supabase.auth.signOut();
-      } catch (err) {
-        console.error('Error signing out of Supabase:', err);
-      }
+      } catch {}
     }
-
     setUser(null);
     setSession(null);
     setProfile(null);
   };
 
-  // 7. Update Profile Name
   const updateProfileName = async (name: string): Promise<void> => {
-    if (!profile || !user) return;
-    const updated: UserProfile = { ...profile, fullName: name };
-    setProfile(updated);
-
-    if (configured) {
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        full_name: name,
-        updated_at: new Date().toISOString(),
-      });
+    if (!user) return;
+    try {
+      if (configured) {
+        await supabase.from('profiles').update({ full_name: name }).eq('id', user.id);
+      }
+      setProfile((prev) => (prev ? { ...prev, fullName: name } : null));
+    } catch (err) {
+      console.error('Failed to update profile name:', err);
     }
+  };
+
+  const verifyDatabaseRole = async (): Promise<UserRole> => {
+    if (!user || !configured) return profile?.role || 'user';
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (data?.role) {
+        const r = data.role as UserRole;
+        setProfile((prev) => (prev ? { ...prev, role: r } : null));
+        return r;
+      }
+    } catch {}
+    return profile?.role || 'user';
   };
 
   return (
@@ -527,11 +521,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         session,
         profile,
-        isAdmin: profile?.role === 'admin',
-        isManager: profile?.role === 'manager' || profile?.role === 'admin',
+        isAdmin,
+        isManager,
         loading,
         isConfigured: configured,
         signIn,
+        signInAsDemo,
         signUp,
         signInWithGoogle,
         resetPassword,

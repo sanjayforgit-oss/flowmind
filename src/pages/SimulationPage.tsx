@@ -821,6 +821,7 @@ export const SimulationPage: React.FC = () => {
         onClose={() => setIsRenderModalOpen(false)}
         workflowId={activeWorkflow.id}
         workflowName={activeWorkflow.name}
+        workflowData={activeWorkflow}
         simulationContext={{
           ...context,
           simulatedSteps: steps.length,

@@ -1,5 +1,5 @@
 /**
- * FLOWMIND AI — Render API Request Handlers & Express Route Bindings
+ * FLOWMIND AI — Render API Request Handlers & Route Bindings
  * Serves HTTP endpoints mounted in server.js, server/index.js, and vite.config.ts
  */
 
@@ -7,7 +7,10 @@ import {
   getRenderStatus,
   triggerRenderWorkflow,
   getExecutionDetails,
+  approveWorkflowExecution,
 } from './executionService.js';
+import { generateRenderWorkflowCode } from './codeGenerator.js';
+import { getEngineCapabilities } from './config.js';
 
 /**
  * Universal request handler for Render Workflows endpoints.
@@ -31,30 +34,79 @@ export async function handleRenderApiRequest(rawPathname, method, body = {}) {
     return {
       success: true,
       configured: status.configured,
-      message: status.configured
-        ? 'Render Workflows execution engine configured.'
-        : 'Render execution is not configured.',
+      message: status.message,
       data: status,
     };
   }
 
-  // 2. POST /api/render/execute (or /execute if mounted on an Express sub-router)
+  // 2. GET /api/render/tasks (Registered workflows & tasks catalog)
+  if (cleanPath === '/api/render/tasks' && httpMethod === 'GET') {
+    const capabilities = getEngineCapabilities();
+    return {
+      success: true,
+      tasks: capabilities.supportedWorkflows,
+      cloudConfigured: capabilities.cloudConfigured,
+      localEngineAvailable: capabilities.localEngineAvailable,
+    };
+  }
+
+  // 3. POST /api/render/code (Generate @renderinc/sdk/workflows TypeScript code)
+  if (cleanPath === '/api/render/code' && httpMethod === 'POST') {
+    const workflow = body.workflow || body;
+    const code = generateRenderWorkflowCode(workflow);
+    return {
+      success: true,
+      workflowName: workflow.name || 'Workflow',
+      code,
+      framework: '@renderinc/sdk/workflows',
+    };
+  }
+
+  // 4. POST /api/render/execute
   if (
     (cleanPath === '/api/render/execute' || cleanPath === '/execute') &&
     httpMethod === 'POST'
   ) {
-    const { workflowId, workflowName, context, userId, approved } = body;
+    const {
+      workflowId,
+      workflowName,
+      context,
+      workflowData,
+      userId,
+      approved,
+      preferMode,
+      pauseAtApproval,
+    } = body;
+
     const result = await triggerRenderWorkflow({
       workflowId,
       workflowName,
       context,
+      workflowData,
       userId,
       approved,
+      preferMode,
+      pauseAtApproval,
     });
     return result;
   }
 
-  // 3. GET /api/render/executions/:id
+  // 5. POST /api/render/approve (Human-in-the-Loop Resumption)
+  if (cleanPath === '/api/render/approve' && httpMethod === 'POST') {
+    const { executionId, approved, approverRole, approverName, comments } = body;
+    if (!executionId) {
+      return { success: false, error: 'Execution ID required.', code: 'INVALID_ID' };
+    }
+    const result = await approveWorkflowExecution(executionId, {
+      approved,
+      approverRole,
+      approverName,
+      comments,
+    });
+    return result;
+  }
+
+  // 6. GET /api/render/executions/:id
   if (
     cleanPath.startsWith('/api/render/executions/') ||
     cleanPath.startsWith('/executions/')
@@ -76,18 +128,12 @@ export async function handleRenderApiRequest(rawPathname, method, body = {}) {
 
 /**
  * Express-compatible middleware for Render Workflows routes.
- * Can be mounted directly:
- *   app.use(renderExpressMiddleware);
- * or on a path prefix:
- *   app.use('/api/render', renderExpressMiddleware);
  */
 export function renderExpressMiddleware(req, res, next) {
   const url = req.originalUrl || req.url || '';
   const pathname = url.split('?')[0];
 
-  // Intercept if path belongs to Render API
   if (pathname.startsWith('/api/render') || req.baseUrl === '/api/render') {
-    // Collect body if not already parsed by express.json()
     if (req.body && typeof req.body === 'object') {
       processRequest(req.body);
     } else if (typeof req.on === 'function') {
@@ -141,29 +187,25 @@ export function renderExpressMiddleware(req, res, next) {
 }
 
 /**
- * Mounts the Render Workflow endpoints onto an existing Express application or Router.
- * Usage:
- *   import express from 'express';
- *   import { mountRenderRoutes } from './server/render/renderHandler.js';
- *   mountRenderRoutes(app);
- *
- * @param {Object} routerOrApp - Express Application or Router instance
+ * Mounts the Render Workflow endpoints onto an Express app.
  */
 export function mountRenderRoutes(routerOrApp) {
-  // Status check endpoint
-  routerOrApp.get('/api/render/status', async (req, res) => {
+  routerOrApp.get('/api/render/status', async (_req, res) => {
     const status = getRenderStatus();
-    res.json({
-      success: true,
-      configured: status.configured,
-      message: status.configured
-        ? 'Render Workflows execution engine configured.'
-        : 'Render execution is not configured.',
-      data: status,
-    });
+    res.json({ success: true, ...status });
   });
 
-  // Workflow trigger execution endpoint
+  routerOrApp.get('/api/render/tasks', async (_req, res) => {
+    const capabilities = getEngineCapabilities();
+    res.json({ success: true, tasks: capabilities.supportedWorkflows });
+  });
+
+  routerOrApp.post('/api/render/code', async (req, res) => {
+    const workflow = req.body.workflow || req.body;
+    const code = generateRenderWorkflowCode(workflow);
+    res.json({ success: true, code, framework: '@renderinc/sdk/workflows' });
+  });
+
   routerOrApp.post('/api/render/execute', async (req, res) => {
     try {
       const result = await triggerRenderWorkflow(req.body || {});
@@ -173,7 +215,16 @@ export function mountRenderRoutes(routerOrApp) {
     }
   });
 
-  // Execution details / polling endpoint
+  routerOrApp.post('/api/render/approve', async (req, res) => {
+    try {
+      const { executionId, approved, approverRole, approverName, comments } = req.body || {};
+      const result = await approveWorkflowExecution(executionId, { approved, approverRole, approverName, comments });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || 'Approval failed' });
+    }
+  });
+
   routerOrApp.get('/api/render/executions/:id', async (req, res) => {
     const executionId = req.params.id;
     const result = await getExecutionDetails(executionId);

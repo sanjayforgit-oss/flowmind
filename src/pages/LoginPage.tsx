@@ -11,9 +11,9 @@ import {
   Loader2,
   User,
   Briefcase,
-  ShieldCheck,
   Building2,
   Crown,
+  Zap,
 } from 'lucide-react';
 import { useAuth, type UserRole, type Department } from '../context/AuthContext';
 import { Button } from '../components/common/Button';
@@ -40,7 +40,7 @@ export const LoginPage: React.FC = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const { signIn, signInWithGoogle, isConfigured } = useAuth();
+  const { signIn, signInAsDemo, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
@@ -50,6 +50,16 @@ export const LoginPage: React.FC = () => {
   const handleToggleMode = (mode: UserRole) => {
     setPortalMode(mode);
     setErrorMessage(null);
+  };
+
+  const handleDemoSignIn = async (role: UserRole = 'admin', dept: Department = 'Operations') => {
+    try {
+      await signInAsDemo(role, dept);
+      showToast(`Welcome! Signed in as ${role === 'admin' ? 'Administrator' : 'Demo Operator'}.`, 'success');
+      navigate(from === '/admin' && role !== 'admin' ? '/' : from, { replace: true });
+    } catch {
+      showToast('Demo sign-in failed. Please try again.', 'error');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -118,7 +128,7 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#07090f] text-slate-100 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden">
-      {/* Subtle Background Glows */}
+      {/* Background Glows */}
       <div
         className={`absolute top-1/4 -left-32 w-96 h-96 rounded-full blur-3xl pointer-events-none transition-colors duration-500 ${
           portalMode === 'admin'
@@ -138,7 +148,7 @@ export const LoginPage: React.FC = () => {
         }`}
       />
 
-      {/* Main Card Container */}
+      {/* Main Container */}
       <div className="w-full max-w-md relative z-10">
         {/* Brand Header */}
         <div className="text-center mb-6">
@@ -185,27 +195,56 @@ export const LoginPage: React.FC = () => {
               ? 'Administrator Sign In'
               : portalMode === 'manager'
               ? 'Manager Sign In'
-              : 'Welcome back 👋'}
+              : 'Welcome to FlowMind AI'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            {portalMode === 'admin'
-              ? 'Enter verified system administrator credentials'
-              : portalMode === 'manager'
-              ? 'Sign in with your department credentials'
-              : 'Sign in to continue to FLOWMIND'}
+            Sign in or use 1-click access to explore workflows and Render execution
           </p>
+        </div>
+
+        {/* 1-Click Instant Demo Login Banner */}
+        <div className="mb-4 p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-3 shadow-xl backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-indigo-300 font-semibold text-xs">
+              <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400" />
+              <span>1-Click Instant Access (No Password Needed)</span>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              Instant
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            Skip the password and enter FlowMind AI immediately with full access to the Workflow Builder, Render Workflows engine, and telemetry logs:
+          </p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => handleDemoSignIn('admin', 'Operations')}
+              className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-300" />
+              <span>Enter as Admin</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDemoSignIn('user', 'Operations')}
+              className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <User className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Enter as Operator</span>
+            </button>
+          </div>
         </div>
 
         {/* 3-Role Selection Toggle */}
         <div className="mb-4">
           <div className="text-center mb-2">
             <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400">
-              Who are you signing in as?
+              Or Sign In with Credentials
             </span>
           </div>
 
           <div className="p-1 rounded-xl bg-[#0e1222] border border-white/10 grid grid-cols-3 gap-1 shadow-inner">
-            {/* 1. Admin */}
             <button
               type="button"
               onClick={() => handleToggleMode('admin')}
@@ -219,7 +258,6 @@ export const LoginPage: React.FC = () => {
               <span>Admin</span>
             </button>
 
-            {/* 2. Manager */}
             <button
               type="button"
               onClick={() => handleToggleMode('manager')}
@@ -233,7 +271,6 @@ export const LoginPage: React.FC = () => {
               <span>Manager</span>
             </button>
 
-            {/* 3. User */}
             <button
               type="button"
               onClick={() => handleToggleMode('user')}
@@ -259,39 +296,6 @@ export const LoginPage: React.FC = () => {
               : 'border-white/[0.08]'
           }`}
         >
-          {/* Admin Security Banner */}
-          {portalMode === 'admin' && (
-            <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-rose-300 flex items-start gap-2.5 animate-in fade-in duration-150">
-              <ShieldCheck className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <span className="text-[11px] leading-relaxed">
-                Protected Administrator Portal. Role verified securely from database.
-              </span>
-            </div>
-          )}
-
-          {/* Manager Authorization Banner */}
-          {portalMode === 'manager' && (
-            <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
-              <Briefcase className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span className="text-[11px] leading-relaxed">
-                Department Manager Portal. Grants authorization to approve/reject workflow checkpoints for your department.
-              </span>
-            </div>
-          )}
-
-          {/* Unconfigured Alert */}
-          {!isConfigured && (
-            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-semibold">Supabase Configuration Required</strong>
-                <span className="text-[11px] text-amber-200/80 leading-relaxed block mt-0.5">
-                  Please update your real <code className="font-mono bg-black/40 px-1 py-0.5 rounded text-amber-300">VITE_SUPABASE_URL</code> and <code className="font-mono bg-black/40 px-1 py-0.5 rounded text-amber-300">VITE_SUPABASE_ANON_KEY</code> in the <code className="font-mono bg-black/40 px-1 py-0.5 rounded text-amber-300">.env</code> file.
-                </span>
-              </div>
-            </div>
-          )}
-
           {/* Error Alert */}
           {errorMessage && (
             <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-500/30 flex items-start gap-2.5 text-xs text-rose-300 animate-in fade-in duration-150">
@@ -300,7 +304,7 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
-          {/* Google OAuth Button (User Mode Only) */}
+          {/* Google OAuth Button */}
           {portalMode === 'user' && (
             <>
               <button
@@ -334,18 +338,16 @@ export const LoginPage: React.FC = () => {
                 <span>{googleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
               </button>
 
-              {/* Divider */}
               <div className="relative flex items-center justify-center my-2">
                 <div className="w-full border-t border-white/[0.08]" />
                 <span className="absolute bg-[#0c101d] px-3 text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                  OR CONTINUE WITH EMAIL
+                  OR EMAIL
                 </span>
               </div>
             </>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email Field */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-300 block font-mono">
                 {portalMode === 'admin'
@@ -357,13 +359,7 @@ export const LoginPage: React.FC = () => {
               <Input
                 type="email"
                 icon={<Mail className="w-4 h-4 text-slate-400" />}
-                placeholder={
-                  portalMode === 'admin'
-                    ? 'admin@flowmind.ai'
-                    : portalMode === 'manager'
-                    ? 'manager@company.com'
-                    : 'name@company.com'
-                }
+                placeholder="name@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -372,7 +368,6 @@ export const LoginPage: React.FC = () => {
               />
             </div>
 
-            {/* Department Dropdown (Manager Mode Only) */}
             {portalMode === 'manager' && (
               <div className="space-y-1.5 animate-in fade-in duration-150">
                 <label className="text-xs font-medium text-amber-300 block font-mono flex items-center gap-1.5">
@@ -395,7 +390,6 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            {/* Password Field */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-slate-300 font-mono">
@@ -433,7 +427,6 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Submit Button */}
             <Button
               type="submit"
               variant="primary"
@@ -448,31 +441,27 @@ export const LoginPage: React.FC = () => {
               }`}
             >
               {portalMode === 'admin'
-                ? 'Admin Sign In'
+                ? 'Sign in as Administrator'
                 : portalMode === 'manager'
-                ? 'Manager Sign In'
-                : 'Sign In'}
-              <ArrowRight className="w-4 h-4 ml-1" />
+                ? `Sign in to ${department} Department`
+                : 'Sign in to Account'}
             </Button>
           </form>
 
-          {/* Switch to Sign Up (User Mode Only) */}
           {portalMode === 'user' && (
-            <div className="text-center pt-2 text-xs text-slate-400">
-              Don&apos;t have an account?{' '}
-              <Link
-                to="/signup"
-                className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer ml-1"
-              >
-                Create Account
-              </Link>
+            <div className="text-center pt-2 border-t border-white/[0.08]">
+              <p className="text-xs text-slate-400">
+                Don't have an account?{' '}
+                <Link
+                  to="/signup"
+                  className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors inline-flex items-center gap-1 group"
+                >
+                  Create account
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                </Link>
+              </p>
             </div>
           )}
-        </div>
-
-        {/* Security Footer */}
-        <div className="text-center mt-6 text-xs text-slate-500 font-mono flex items-center justify-center gap-1.5">
-          <span>Protected by FlowMind Role-Based Access Control</span>
         </div>
       </div>
     </div>

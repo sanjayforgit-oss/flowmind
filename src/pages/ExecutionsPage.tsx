@@ -60,7 +60,7 @@ export const ExecutionsPage: React.FC = () => {
     const isRender =
       exec.id.startsWith('rn-exec') ||
       exec.workflowName.toLowerCase().includes('render') ||
-      exec.triggerEvent.toLowerCase().includes('render');
+      (exec.triggerEvent || '').toLowerCase().includes('render');
 
     const matchesEngine =
       engineFilter === 'all'
@@ -73,7 +73,7 @@ export const ExecutionsPage: React.FC = () => {
     const matchesSearch =
       exec.workflowName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       exec.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      exec.triggerEvent.toLowerCase().includes(searchTerm.toLowerCase());
+      (exec.triggerEvent || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     return matchesEngine && matchesStatus && matchesSearch;
   });
@@ -211,7 +211,7 @@ export const ExecutionsPage: React.FC = () => {
                   const isRender =
                     exec.id.startsWith('rn-exec') ||
                     exec.workflowName.toLowerCase().includes('render') ||
-                    exec.triggerEvent.toLowerCase().includes('render');
+                    (exec.triggerEvent || '').toLowerCase().includes('render');
 
                   return (
                     <tr

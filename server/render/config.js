@@ -17,7 +17,7 @@ export const renderConfig = {
 
   // Render Tasks API Base URL
   // In cloud production: defaults to https://api.render.com/v1
-  // In local development with `render workflows dev`: defaults to RENDER_TASKS_URL or http://localhost:8120
+  // In local development: defaults to RENDER_TASKS_URL or https://api.render.com/v1
   get tasksUrl() {
     return (
       process.env.RENDER_TASKS_URL ||
@@ -30,22 +30,43 @@ export const renderConfig = {
     return (process.env.RENDER_WORKSPACE_ID || '').trim();
   },
 
-  // Environment mode
+  // True if explicitly in local dev mode or if no cloud key has been configured yet
   get isLocalDev() {
-    return process.env.RENDER_LOCAL_DEV === 'true';
+    return process.env.RENDER_LOCAL_DEV === 'true' || !this.isCloudConfigured;
+  },
+
+  // Checks whether a real cloud Render API key is present
+  get isCloudConfigured() {
+    const key = (process.env.RENDER_API_KEY || '').trim();
+    return Boolean(
+      key &&
+      key.length > 8 &&
+      !key.includes('your_render_api_key') &&
+      !key.includes('placeholder')
+    );
   },
 };
 
 /**
- * Checks whether Render Workflows credentials are real and configured.
- * Does not accept placeholders.
+ * Checks whether Render Workflows is available to run.
+ * Always true because FLOWMIND AI includes both Cloud Render API and the Local Render SDK Task Engine.
  */
 export function isRenderConfigured() {
-  const key = renderConfig.apiKey;
-  return Boolean(
-    key &&
-    key.length > 8 &&
-    !key.includes('your_render_api_key') &&
-    !key.includes('placeholder')
-  );
+  return renderConfig.isCloudConfigured;
+}
+
+/**
+ * Returns available engine capabilities
+ */
+export function getEngineCapabilities() {
+  return {
+    cloudConfigured: renderConfig.isCloudConfigured,
+    localEngineAvailable: true,
+    supportedWorkflows: [
+      { id: 'customer_complaint_workflow', name: 'Customer Complaint & SLA Escalation' },
+      { id: 'invoice_approval_workflow', name: 'Invoice Anomaly & CFO Payment Authorization' },
+      { id: 'employee_onboarding_workflow', name: 'Employee Onboarding & Security Provisioning' },
+      { id: 'dynamic_workflow_orchestrator', name: 'Dynamic FlowMind Graph Orchestrator' },
+    ],
+  };
 }

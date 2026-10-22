@@ -21,19 +21,23 @@ create index if not exists idx_copilot_conversations_updated_at on public.copilo
 alter table public.copilot_conversations enable row level security;
 
 -- Policies for copilot_conversations
+DROP POLICY IF EXISTS "Users can select own copilot conversations" ON public.copilot_conversations;
 create policy "Users can select own copilot conversations"
   on public.copilot_conversations for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own copilot conversations" ON public.copilot_conversations;
 create policy "Users can insert own copilot conversations"
   on public.copilot_conversations for insert
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own copilot conversations" ON public.copilot_conversations;
 create policy "Users can update own copilot conversations"
   on public.copilot_conversations for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own copilot conversations" ON public.copilot_conversations;
 create policy "Users can delete own copilot conversations"
   on public.copilot_conversations for delete
   using (auth.uid() = user_id);
@@ -59,19 +63,23 @@ create index if not exists idx_copilot_messages_created_at on public.copilot_mes
 alter table public.copilot_messages enable row level security;
 
 -- Policies for copilot_messages
+DROP POLICY IF EXISTS "Users can select own copilot messages" ON public.copilot_messages;
 create policy "Users can select own copilot messages"
   on public.copilot_messages for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own copilot messages" ON public.copilot_messages;
 create policy "Users can insert own copilot messages"
   on public.copilot_messages for insert
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own copilot messages" ON public.copilot_messages;
 create policy "Users can update own copilot messages"
   on public.copilot_messages for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own copilot messages" ON public.copilot_messages;
 create policy "Users can delete own copilot messages"
   on public.copilot_messages for delete
   using (auth.uid() = user_id);
@@ -100,14 +108,17 @@ create index if not exists idx_audit_logs_created_at on public.workflow_audit_lo
 alter table public.workflow_audit_logs enable row level security;
 
 -- Policies for workflow_audit_logs
+DROP POLICY IF EXISTS "Users can select own workflow audit logs" ON public.workflow_audit_logs;
 create policy "Users can select own workflow audit logs"
   on public.workflow_audit_logs for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own workflow audit logs" ON public.workflow_audit_logs;
 create policy "Users can insert own workflow audit logs"
   on public.workflow_audit_logs for insert
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own workflow audit logs" ON public.workflow_audit_logs;
 create policy "Users can delete own workflow audit logs"
   on public.workflow_audit_logs for delete
   using (auth.uid() = user_id);
@@ -135,14 +146,17 @@ create table if not exists public.profiles (
 alter table public.profiles enable row level security;
 
 -- Profiles Policies
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
 create policy "Users can view their own profile"
   on public.profiles for select
   using (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 create policy "Users can insert their own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
@@ -190,19 +204,23 @@ create index if not exists idx_workflows_updated_at on public.workflows(updated_
 alter table public.workflows enable row level security;
 
 -- Workflows Strict User-Isolation Policies
+DROP POLICY IF EXISTS "Users can select own workflows" ON public.workflows;
 create policy "Users can select own workflows"
   on public.workflows for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own workflows" ON public.workflows;
 create policy "Users can insert own workflows"
   on public.workflows for insert
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own workflows" ON public.workflows;
 create policy "Users can update own workflows"
   on public.workflows for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own workflows" ON public.workflows;
 create policy "Users can delete own workflows"
   on public.workflows for delete
   using (auth.uid() = user_id);
@@ -227,10 +245,12 @@ create index if not exists idx_executions_user_id on public.workflow_executions(
 -- Enable RLS on Executions
 alter table public.workflow_executions enable row level security;
 
+DROP POLICY IF EXISTS "Users can select own executions" ON public.workflow_executions;
 create policy "Users can select own executions"
   on public.workflow_executions for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own executions" ON public.workflow_executions;
 create policy "Users can insert own executions"
   on public.workflow_executions for insert
   with check (auth.uid() = user_id);
@@ -268,6 +288,7 @@ set role = 'admin',
 -- 4. Cross-Tenant Query Policies for Admins and Managers
 drop policy if exists "Admins can view all audit logs" on public.workflow_audit_logs;
 drop policy if exists "Admins and Managers can view all audit logs" on public.workflow_audit_logs;
+DROP POLICY IF EXISTS "Admins and Managers can view all audit logs" ON public.workflow_audit_logs;
 create policy "Admins and Managers can view all audit logs"
   on public.workflow_audit_logs for select
   using (
@@ -277,6 +298,7 @@ create policy "Admins and Managers can view all audit logs"
 
 drop policy if exists "Admins can view all workflows" on public.workflows;
 drop policy if exists "Admins and Managers can view all workflows" on public.workflows;
+DROP POLICY IF EXISTS "Admins and Managers can view all workflows" ON public.workflows;
 create policy "Admins and Managers can view all workflows"
   on public.workflows for select
   using (
@@ -286,6 +308,7 @@ create policy "Admins and Managers can view all workflows"
 
 drop policy if exists "Admins can view all executions" on public.workflow_executions;
 drop policy if exists "Admins and Managers can view all executions" on public.workflow_executions;
+DROP POLICY IF EXISTS "Admins and Managers can view all executions" ON public.workflow_executions;
 create policy "Admins and Managers can view all executions"
   on public.workflow_executions for select
   using (
@@ -323,6 +346,7 @@ $$ language plpgsql security definer;
 -- 4. Secure RLS policies on profiles
 -- Users can view their own profile; Admins can view all profiles
 drop policy if exists "Users can view their own profile" on public.profiles;
+DROP POLICY IF EXISTS "Users can view their own profile or admins view all" ON public.profiles;
 create policy "Users can view their own profile or admins view all"
   on public.profiles for select
   using (
@@ -332,6 +356,7 @@ create policy "Users can view their own profile or admins view all"
 
 -- Users can update their own profile, but CANNOT self-escalate role to admin
 drop policy if exists "Users can update their own profile" on public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile without role escalation" ON public.profiles;
 create policy "Users can update own profile without role escalation"
   on public.profiles for update
   using (auth.uid() = id)
@@ -344,14 +369,17 @@ create policy "Users can update own profile without role escalation"
   );
 
 -- 5. Admin global view policies for audit logs and platform workflows
+DROP POLICY IF EXISTS "Admins can view all audit logs" ON public.workflow_audit_logs;
 create policy "Admins can view all audit logs"
   on public.workflow_audit_logs for select
   using ((select role from public.profiles where id = auth.uid()) = 'admin');
 
+DROP POLICY IF EXISTS "Admins can view all workflows" ON public.workflows;
 create policy "Admins can view all workflows"
   on public.workflows for select
   using ((select role from public.profiles where id = auth.uid()) = 'admin');
 
+DROP POLICY IF EXISTS "Admins can view all executions" ON public.workflow_executions;
 create policy "Admins can view all executions"
   on public.workflow_executions for select
   using ((select role from public.profiles where id = auth.uid()) = 'admin');
@@ -379,22 +407,26 @@ alter table public.notifications enable row level security;
 
 -- Policies on notifications
 drop policy if exists "Users can view own notifications" on public.notifications;
+DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
 create policy "Users can view own notifications"
   on public.notifications for select
   using (auth.uid() = user_id);
 
 drop policy if exists "System and approvers can insert notifications" on public.notifications;
+DROP POLICY IF EXISTS "System and approvers can insert notifications" ON public.notifications;
 create policy "System and approvers can insert notifications"
   on public.notifications for insert
   with check (auth.uid() is not null);
 
 drop policy if exists "Users can update own notifications" on public.notifications;
+DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
 create policy "Users can update own notifications"
   on public.notifications for update
   using (auth.uid() = user_id);
 
 -- 2. Enhanced RLS on simulation_approval_requests to guarantee Manager & Admin multi-tenant visibility
 drop policy if exists "Select simulation approval requests" on public.simulation_approval_requests;
+DROP POLICY IF EXISTS "Select simulation approval requests" ON public.simulation_approval_requests;
 create policy "Select simulation approval requests"
   on public.simulation_approval_requests for select
   using (
@@ -414,6 +446,7 @@ create policy "Select simulation approval requests"
 
 -- Update policy with double-decision protection
 drop policy if exists "Update simulation approval requests" on public.simulation_approval_requests;
+DROP POLICY IF EXISTS "Update simulation approval requests" ON public.simulation_approval_requests;
 create policy "Update simulation approval requests"
   on public.simulation_approval_requests for update
   using (
@@ -460,6 +493,7 @@ alter table public.simulation_approval_requests enable row level security;
 -- Managers: view requests matching their department + their own requests
 -- Users: view their own requests
 drop policy if exists "Select simulation approval requests" on public.simulation_approval_requests;
+DROP POLICY IF EXISTS "Select simulation approval requests" ON public.simulation_approval_requests;
 create policy "Select simulation approval requests"
   on public.simulation_approval_requests for select
   using (
@@ -474,6 +508,7 @@ create policy "Select simulation approval requests"
 -- 3. Insert Policy:
 -- Authenticated users can submit approval requests for their own account
 drop policy if exists "Insert simulation approval requests" on public.simulation_approval_requests;
+DROP POLICY IF EXISTS "Insert simulation approval requests" ON public.simulation_approval_requests;
 create policy "Insert simulation approval requests"
   on public.simulation_approval_requests for insert
   with check (auth.uid() = requester_id or auth.uid() is not null);
@@ -481,6 +516,7 @@ create policy "Insert simulation approval requests"
 -- 4. Update Policy (Approve / Reject):
 -- Only Admins and Authorized Department Managers can update request status
 drop policy if exists "Update simulation approval requests" on public.simulation_approval_requests;
+DROP POLICY IF EXISTS "Update simulation approval requests" ON public.simulation_approval_requests;
 create policy "Update simulation approval requests"
   on public.simulation_approval_requests for update
   using (
@@ -506,6 +542,7 @@ on conflict (id) do nothing;
 
 -- Allow users to update their own execution telemetry records
 drop policy if exists "Users can update own executions" on public.workflow_executions;
+DROP POLICY IF EXISTS "Users can update own executions" ON public.workflow_executions;
 create policy "Users can update own executions"
   on public.workflow_executions for update
   using (auth.uid() = user_id)
@@ -513,6 +550,7 @@ create policy "Users can update own executions"
 
 -- Ensure admins and managers can view all workflow executions
 drop policy if exists "Admins and Managers can view all executions" on public.workflow_executions;
+DROP POLICY IF EXISTS "Admins and Managers can view all executions" ON public.workflow_executions;
 create policy "Admins and Managers can view all executions"
   on public.workflow_executions for select
   using (

@@ -34,6 +34,7 @@ export const WorkflowsPage: React.FC = () => {
   const [searchFilter, setSearchFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [deleteWorkflowId, setDeleteWorkflowId] = useState<string | null>(null);
 
   const [newTitle, setNewTitle] = useState('');
@@ -192,12 +193,20 @@ export const WorkflowsPage: React.FC = () => {
       estimatedExecution: '1.2 sec',
     };
 
-    await saveCurrentWorkflow(newGeneratedWf);
-    setIsCreateModalOpen(false);
-    setNewTitle('');
-    setNewDesc('');
-    setViewMode('builder');
-    showToast(`Workflow "${newTitle}" created and saved!`, 'success');
+    setIsCreating(true);
+    showToast(`Workflow "${newTitle}" creation running in progress...`, 'info');
+    try {
+      await saveCurrentWorkflow(newGeneratedWf);
+      setIsCreateModalOpen(false);
+      setNewTitle('');
+      setNewDesc('');
+      setViewMode('builder');
+      showToast(`Workflow "${newTitle}" created successfully (Success)! Ready for execution.`, 'success');
+    } catch {
+      showToast('Failed to create workflow. Please try again.', 'error');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -546,8 +555,8 @@ export const WorkflowsPage: React.FC = () => {
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm">
-              Save Workflow
+            <Button type="submit" variant="primary" size="sm" loading={isCreating}>
+              {isCreating ? 'Creating Workflow (Running)...' : 'Save Workflow'}
             </Button>
           </div>
         </form>

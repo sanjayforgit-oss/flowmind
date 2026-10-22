@@ -63,15 +63,17 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({ workflow }) => {
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">
               Workflow Builder
             </span>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize border ${
-                workflow.status === 'ready'
-                  ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
-                  : 'text-amber-300 bg-amber-500/10 border-amber-500/20'
-              }`}
-            >
-              {workflow.status}
-            </span>
+            {isSaving ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono capitalize border text-indigo-300 bg-indigo-500/10 border-indigo-500/30 flex items-center gap-1.5 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                Running (Creating...)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono capitalize border text-emerald-300 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Success ({workflow.status === 'ready' ? 'Ready' : 'Created'})
+              </span>
+            )}
           </div>
 
           <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white">

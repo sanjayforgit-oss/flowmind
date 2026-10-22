@@ -92,14 +92,18 @@ const server = http.createServer((req, res) => {
       if (readErr) {
         res.writeHead(500);
         res.end('Error loading asset.');
-        return;
+      } else {
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(content, 'utf-8');
       }
-      res.writeHead(200, { 'Content-Type': contentType });
-      res.end(content, 'utf-8');
     });
   });
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[FLOWMIND AI SERVER] Running on port ${PORT}`);
+  // Run Render Workflows Worker in the same service to allow 100% free plan deployment
+  import('./server/render/worker.js').catch((err) => {
+    console.log('[RENDER WORKER] Worker background auto-start notice:', err?.message || err);
+  });
 });

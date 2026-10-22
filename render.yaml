@@ -1,19 +1,15 @@
 # ==============================================================================
-# FLOWMIND AI — Official Render Blueprint Configuration
-# Declares the Full-Stack Web Platform and Render Workflows Worker Service
-# Deploy with 1-click via Render Dashboard: "New" -> "Blueprint"
+# FLOWMIND AI — 100% Free Plan Render Blueprint Configuration
+# Deploys as a Free Web Service on Render with zero credit card required.
 # ==============================================================================
 
 version: "1"
 
 services:
-  # ----------------------------------------------------------------------------
-  # 1. FLOWMIND AI Web Service (Frontend + Backend API Gateway)
-  # ----------------------------------------------------------------------------
   - type: web
-    name: flowmind-ai-platform
+    name: flowmind
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm install && npm run build
     startCommand: npm run start
@@ -37,23 +33,3 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
-
-  # ----------------------------------------------------------------------------
-  # 2. FLOWMIND AI Render Workflows Dedicated Worker
-  # ----------------------------------------------------------------------------
-  - type: worker
-    name: flowmind-workflows-worker
-    runtime: node
-    plan: starter
-    region: oregon
-    buildCommand: npm install
-    startCommand: npm run worker
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: RENDER_WORKFLOW_SLUG
-        value: flowmind-workflows
-      - key: RENDER_TASKS_URL
-        value: https://api.render.com/v1
-      - key: RENDER_API_KEY
-        sync: false
